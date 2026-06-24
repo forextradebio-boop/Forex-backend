@@ -1,12 +1,7 @@
 import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Find the correct .env file relative to the backend directory
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+// Load .env for both Render and local development
+dotenv.config();
 
 console.log("JWT_SECRET loaded:", !!process.env.JWT_SECRET ? "YES" : "NO");
 console.log("JWT_REFRESH_SECRET loaded:", !!process.env.JWT_REFRESH_SECRET ? "YES" : "NO");
@@ -24,6 +19,6 @@ export const config = {
   mongoUri: process.env.MONGODB_URI || '',
   jwtSecret: process.env.JWT_SECRET || '',
   jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || '',
-  port: process.env.PORT || "8000",
+  port: process.env.PORT || '8000',
   nodeEnv: process.env.NODE_ENV || 'development',
 };
