@@ -11,7 +11,7 @@ export class SocketServer {
 
     this.io = new Server(server, {
       cors: {
-        origin: allowedOrigins,
+        origin: true, // Allow all origins to prevent CORS errors
         methods: ['GET', 'POST'],
         credentials: true
       }
