@@ -30,12 +30,12 @@ import transactionRoutes from './src/routes/transactionRoutes';
 console.log("MONGO URI =", process.env.MONGODB_URI);
 
 const app = express();
-const allowedOrigins = process.env.FRONTEND_URL 
-  ? process.env.FRONTEND_URL.split(',') 
+const allowedOrigins = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(',')
   : ['http://localhost:5173', 'http://localhost:5174'];
 
 app.use(cors({
-  origin: allowedOrigins,
+  origin: true, // Allow all origins for now to prevent CORS errors
   credentials: true
 }));
 app.use(express.json({ limit: '50mb' }));
