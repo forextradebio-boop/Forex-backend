@@ -10,7 +10,7 @@ import { WalletModel } from '../models/Wallet';
 export class PriceEngine {
   private static isRunning = false;
   private static currentPrices: Record<string, any> = {};
-  private static symbols = ['BTC/USD', 'ETH/USD', 'AAPL', 'TSLA', 'EUR/USD']; // Add more as needed
+  private static symbols = ['BTCUSD', 'ETHUSD', 'AAPL', 'TSLA', 'EURUSD']; // Add more as needed
 
   static start() {
     if (this.isRunning) return;

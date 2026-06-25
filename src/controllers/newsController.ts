@@ -8,7 +8,7 @@ export const getNews = async (req: Request, res: Response) => {
           id: "1",
           title: "Market Update",
           summary: "Global markets remain stable",
-          source: "Baha Markets",
+          source: "Forex Factory",
           publishedAt: "2026-01-01T00:00:00Z"
         }
       ]

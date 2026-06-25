@@ -10,7 +10,7 @@ export class NewsService {
         title: `Major Economic Update for ${category}`,
         summary: `Market shows unexpected volatility due to recent announcements in the ${category} sector.`,
         url: '#',
-        source: 'Baha Markets Analyst',
+        source: 'Forex Factory Analyst',
         publishedAt: new Date().toISOString()
       },
       {

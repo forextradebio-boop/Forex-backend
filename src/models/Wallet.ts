@@ -12,10 +12,10 @@ export interface IWallet extends Document {
 const WalletSchema = new Schema<IWallet>(
   {
     userId: { type: Schema.Types.ObjectId, required: true, ref: 'User' },
-    balance: { type: Number, default: 0, min: [0, 'Balance cannot be negative'] },
-    equity: { type: Number, default: 0, min: [0, 'Equity cannot be negative'] },
-    margin: { type: Number, default: 0, min: [0, 'Margin cannot be negative'] },
-    freeMargin: { type: Number, default: 0, min: [0, 'Free Margin cannot be negative'] },
+    balance: { type: Number, default: 0 },
+    equity: { type: Number, default: 0 },
+    margin: { type: Number, default: 0 },
+    freeMargin: { type: Number, default: 0 },
     pnl: { type: Number, default: 0 },
   },
   { timestamps: true },

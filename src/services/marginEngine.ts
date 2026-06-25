@@ -35,7 +35,7 @@ export class MarginEngine {
     if (wallet) {
       const equity = wallet.balance + totalPnl;
       wallet.equity = equity;
-      wallet.usedMargin = usedMargin;
+      wallet.margin = usedMargin;
       wallet.freeMargin = equity - usedMargin;
       wallet.marginLevel = usedMargin > 0 ? (equity / usedMargin) * 100 : 0;
       await wallet.save();
