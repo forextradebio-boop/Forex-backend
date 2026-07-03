@@ -29,34 +29,46 @@ var import_cors = __toESM(require("cors"), 1);
 
 // src/config/database.ts
 var import_mongoose = __toESM(require("mongoose"), 1);
+var import_mongodb_memory_server = require("mongodb-memory-server");
 
 // src/config/env.ts
 var import_dotenv = __toESM(require("dotenv"), 1);
 import_dotenv.default.config();
+var nodeEnv = process.env.NODE_ENV || "development";
+var defaultJwtSecret = nodeEnv === "production" ? "" : "dev-jwt-secret-change-me";
+var defaultRefreshSecret = nodeEnv === "production" ? "" : "dev-refresh-secret-change-me";
 console.log("JWT_SECRET loaded:", !!process.env.JWT_SECRET ? "YES" : "NO");
 console.log("JWT_REFRESH_SECRET loaded:", !!process.env.JWT_REFRESH_SECRET ? "YES" : "NO");
 console.log("PORT value:", process.env.PORT);
-if (!process.env.JWT_SECRET) {
+if (nodeEnv === "production" && !process.env.JWT_SECRET) {
   throw new Error("JWT_SECRET is missing from .env");
 }
-if (!process.env.JWT_REFRESH_SECRET) {
+if (nodeEnv === "production" && !process.env.JWT_REFRESH_SECRET) {
   throw new Error("JWT_REFRESH_SECRET is missing from .env");
 }
 var config = {
-  mongoUri: process.env.MONGODB_URI || "",
-  jwtSecret: process.env.JWT_SECRET || "",
-  jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || "",
+  mongoUri: process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/forex-factory",
+  jwtSecret: process.env.JWT_SECRET || defaultJwtSecret,
+  jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || defaultRefreshSecret,
   port: process.env.PORT || "8000",
-  nodeEnv: process.env.NODE_ENV || "development"
+  nodeEnv
 };
 
 // src/config/database.ts
+var mongoServer = null;
 var connectDatabase = async () => {
   try {
-    await import_mongoose.default.connect(config.mongoUri, {
-      // useNewUrlParser and useUnifiedTopology are default in Mongoose 6+
-    });
-    console.log("MongoDB Connected Successfully");
+    if (config.nodeEnv !== "production" && config.mongoUri.includes("127.0.0.1:27017")) {
+      mongoServer = await import_mongodb_memory_server.MongoMemoryServer.create();
+      const uri = mongoServer.getUri();
+      await import_mongoose.default.connect(uri);
+      console.log("MongoDB Connected Successfully (in-memory)");
+    } else {
+      await import_mongoose.default.connect(config.mongoUri, {
+        // useNewUrlParser and useUnifiedTopology are default in Mongoose 6+
+      });
+      console.log("MongoDB Connected Successfully");
+    }
   } catch (err) {
     console.error("MongoDB connection error:", err);
     process.exit(1);
@@ -66,6 +78,9 @@ var connectDatabase = async () => {
   });
   const gracefulExit = async () => {
     await import_mongoose.default.connection.close();
+    if (mongoServer) {
+      await mongoServer.stop();
+    }
     console.log("MongoDB connection closed due to app termination");
     process.exit(0);
   };
@@ -90,7 +105,7 @@ var UserSchema = new import_mongoose2.Schema(
     avatar: { type: String },
     password: { type: String, required: true },
     role: { type: String, enum: ["USER", "ADMIN"], default: "USER" },
-    status: { type: String, enum: ["ACTIVE", "BANNED", "SUSPENDED"], default: "ACTIVE" },
+    status: { type: String, enum: ["ACTIVE", "BANNED", "SUSPENDED", "DISABLED", "TRADING_BLOCKED"], default: "ACTIVE" },
     kycStatus: {
       type: String,
       enum: ["UNSUBMITTED", "PENDING", "APPROVED", "REJECTED"],
@@ -113,7 +128,10 @@ var WalletSchema = new import_mongoose3.Schema(
     equity: { type: Number, default: 0 },
     margin: { type: Number, default: 0 },
     freeMargin: { type: Number, default: 0 },
-    pnl: { type: Number, default: 0 }
+    pnl: { type: Number, default: 0 },
+    status: { type: String, enum: ["ACTIVE", "FROZEN"], default: "ACTIVE" },
+    usedMargin: { type: Number, default: 0 },
+    marginLevel: { type: Number, default: 0 }
   },
   { timestamps: true }
 );
@@ -142,16 +160,16 @@ WalletSchema.pre("findOneAndUpdate", async function() {
 var WalletModel = import_mongoose3.default.model("Wallet", WalletSchema);
 
 // src/utils/jwt.ts
-var import_jsonwebtoken = __toESM(require("jsonwebtoken"), 1);
+var jwt = __toESM(require("jsonwebtoken"), 1);
 var signAccessToken = (payload, expiresIn = "15m") => {
-  return import_jsonwebtoken.default.sign(payload, config.jwtSecret, { expiresIn });
+  return jwt.sign(payload, config.jwtSecret, { expiresIn });
 };
 var signRefreshToken = (payload, expiresIn = "7d") => {
-  return import_jsonwebtoken.default.sign(payload, config.jwtRefreshSecret, { expiresIn });
+  return jwt.sign(payload, config.jwtRefreshSecret, { expiresIn });
 };
 var verifyToken = (token, isRefresh = false) => {
   const secret = isRefresh ? config.jwtRefreshSecret : config.jwtSecret;
-  return import_jsonwebtoken.default.verify(token, secret);
+  return jwt.verify(token, secret);
 };
 
 // src/controllers/authController.ts
@@ -197,15 +215,15 @@ var register = async (req, res, next) => {
 };
 var login = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) {
+    const { email, password: passwordInput } = req.body;
+    if (!email || !passwordInput) {
       return res.status(400).json({ error: "Missing email or password" });
     }
     const user = await UserModel.findOne({ email: email.toLowerCase() });
     if (!user) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
-    const match = await import_bcryptjs.default.compare(password, user.password);
+    const match = await import_bcryptjs.default.compare(passwordInput, user.password);
     if (!match) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -226,9 +244,9 @@ var login = async (req, res, next) => {
     const token = signAccessToken({ id: user._id, role: user.role });
     const refreshToken = signRefreshToken({ id: user._id });
     const profile = user.toObject();
-    delete profile.password;
-    profile.id = profile._id;
-    res.json({ token, refreshToken, profile });
+    const { password: _password, ...safeProfile } = profile;
+    safeProfile.id = safeProfile._id;
+    res.json({ token, refreshToken, profile: safeProfile });
   } catch (err) {
     next(err);
   }
@@ -241,8 +259,9 @@ var getProfile = async (req, res, next) => {
       return res.status(404).json({ error: "User not found" });
     }
     const profile = user.toObject();
-    profile.id = profile._id;
-    res.json({ success: true, profile });
+    const { password: _password, ...safeProfile } = profile;
+    safeProfile.id = safeProfile._id;
+    res.json({ success: true, profile: safeProfile });
   } catch (err) {
     next(err);
   }
@@ -270,14 +289,14 @@ var verify2FA = async (req, res, next) => {
     const token = signAccessToken({ id: user._id, role: user.role });
     const refreshToken = signRefreshToken({ id: user._id });
     const profile = user.toObject();
-    delete profile.password;
-    profile.id = profile._id;
+    const { password: _password, ...safeProfile } = profile;
+    safeProfile.id = safeProfile._id;
     res.status(200).json({
       success: true,
       message: "OTP verified",
       token,
       refreshToken,
-      profile
+      profile: safeProfile
     });
   } catch (err) {
     next(err);
@@ -382,7 +401,8 @@ var SocketServer = class {
     const allowedOrigins2 = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(",") : ["http://localhost:5173", "http://localhost:5174"];
     this.io = new import_socket.Server(server2, {
       cors: {
-        origin: allowedOrigins2,
+        origin: true,
+        // Allow all origins to prevent CORS errors
         methods: ["GET", "POST"],
         credentials: true
       }
@@ -393,6 +413,9 @@ var SocketServer = class {
         console.log("Client disconnected:", socket.id);
       });
     });
+  }
+  static getIO() {
+    return this.io;
   }
   static broadcastPrices(prices) {
     if (this.io) {
@@ -411,126 +434,272 @@ var SocketServer = class {
   }
 };
 
-// src/services/apitxService.ts
+// src/services/market.service.ts
 var import_axios = __toESM(require("axios"), 1);
-var ApitxService = class {
-  static getHeaders() {
-    return {
-      "Authorization": `Bearer ${process.env.APITX_API_KEY}`,
-      "Content-Type": "application/json"
-    };
+var MarketService = class {
+  static BASE_URL = "https://api.twelvedata.com";
+  static RAPID_API_BASE_URL = "https://live-stock-market.p.rapidapi.com";
+  static API_KEY = process.env.TWELVE_DATA_API_KEY;
+  static RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
+  static PRICE_TTL_MS = 5e3;
+  static CANDLE_TTL_MS = 6e4;
+  static priceCache = /* @__PURE__ */ new Map();
+  static candleCache = /* @__PURE__ */ new Map();
+  static SYMBOL_MAP = {
+    EURUSD: "EUR/USD",
+    GBPUSD: "GBP/USD",
+    USDJPY: "USD/JPY",
+    AUDUSD: "AUD/USD",
+    USDCAD: "USD/CAD",
+    XAUUSD: "XAU/USD",
+    BTCUSD: "BTC/USD"
+  };
+  static CATEGORY_BY_SYMBOL = {
+    EURUSD: "FOREX",
+    GBPUSD: "FOREX",
+    USDJPY: "FOREX",
+    AUDUSD: "FOREX",
+    USDCAD: "FOREX",
+    XAUUSD: "METALS",
+    BTCUSD: "CRYPTO"
+  };
+  static RAPIDAPI_MARKET_BY_SYMBOL = {
+    EURUSD: "CURRENCIES",
+    GBPUSD: "CURRENCIES",
+    USDJPY: "CURRENCIES",
+    AUDUSD: "CURRENCIES",
+    USDCAD: "CURRENCIES",
+    XAUUSD: "COMMODITIES",
+    BTCUSD: "CRYPTOCURRENCIES"
+  };
+  static normalizeSymbol(symbol) {
+    return symbol?.replace(/\//g, "").replace(/\-/g, "").toUpperCase() || "";
   }
-  static async fetchLivePrices(symbols) {
-    if (!process.env.APITX_API_KEY) return null;
+  static toTwelveSymbol(symbol) {
+    return this.SYMBOL_MAP[this.normalizeSymbol(symbol)] ?? symbol.toUpperCase();
+  }
+  static isValidCandle(candle) {
+    const time = Number(candle?.time);
+    const open = Number(candle?.open);
+    const high = Number(candle?.high);
+    const low = Number(candle?.low);
+    const close = Number(candle?.close);
+    if (!Number.isFinite(time) || time <= 0) {
+      console.warn("[MarketService] Invalid candle time", candle);
+      return false;
+    }
+    if (![open, high, low, close].every((value) => Number.isFinite(value) && value > 0)) {
+      console.warn("[MarketService] Invalid candle values", candle);
+      return false;
+    }
+    if (high < low || high < open || high < close || low > open || low > close) {
+      console.warn("[MarketService] Invalid candle range", candle);
+      return false;
+    }
+    return true;
+  }
+  static async getRapidPrice(symbol) {
+    if (!this.RAPIDAPI_KEY) {
+      return null;
+    }
+    const market = this.RAPIDAPI_MARKET_BY_SYMBOL[symbol] ?? "CURRENCIES";
     try {
-      const res = await import_axios.default.get(`https://api.apitx.com/v1/market/quotes?symbols=${symbols.join(",")}`, {
-        headers: this.getHeaders()
+      const response = await import_axios.default.get(`${this.RAPID_API_BASE_URL}/v1/market/summary`, {
+        params: { market, symbol },
+        headers: {
+          "x-rapidapi-host": "live-stock-market.p.rapidapi.com",
+          "x-rapidapi-key": this.RAPIDAPI_KEY,
+          "Content-Type": "application/json"
+        },
+        timeout: 1e4
       });
-      return res.data;
-    } catch (err) {
-      console.error("APITX fetchLivePrices failed", err);
+      const price = Number(response?.data?.data?.marketSummaryResponse?.result?.[0]?.regularMarketPrice?.raw);
+      return Number.isFinite(price) && price > 0 ? price : null;
+    } catch (error) {
+      console.warn("[MarketService] RapidAPI summary fetch failed for", symbol, error);
       return null;
     }
   }
-  static async placeOrder(payload) {
-    if (!process.env.APITX_API_KEY) return { id: "mock_" + Date.now(), status: "FILLED" };
+  static async getPrice(symbol) {
+    const normalized = this.normalizeSymbol(symbol);
+    const cacheKey = `price:${normalized}`;
+    const now = Date.now();
+    const cached = this.priceCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return cached.value;
+    }
+    const rapidPrice = await this.getRapidPrice(normalized);
+    if (rapidPrice !== null) {
+      this.priceCache.set(cacheKey, { value: rapidPrice, expiresAt: now + this.PRICE_TTL_MS });
+      return rapidPrice;
+    }
+    const twelveSymbol = this.toTwelveSymbol(normalized);
     try {
-      const res = await import_axios.default.post("https://api.apitx.com/v1/trading/orders", payload, {
-        headers: this.getHeaders()
+      const response = await import_axios.default.get(`${this.BASE_URL}/price`, {
+        params: { symbol: twelveSymbol, apikey: this.API_KEY },
+        timeout: 1e4
       });
-      return res.data;
-    } catch (err) {
-      throw new Error("APITX placeOrder failed");
+      const price = Number(response?.data?.price);
+      const validPrice = Number.isFinite(price) && price > 0 ? price : null;
+      this.priceCache.set(cacheKey, { value: validPrice, expiresAt: now + this.PRICE_TTL_MS });
+      return validPrice;
+    } catch (error) {
+      console.error("[MarketService] Price fetch failed for", normalized, error);
+      return null;
     }
   }
-  static async modifyOrder(orderId, payload) {
-    if (!process.env.APITX_API_KEY) return { id: orderId, status: "MODIFIED" };
-    try {
-      const res = await import_axios.default.put(`https://api.apitx.com/v1/trading/orders/${orderId}`, payload, {
-        headers: this.getHeaders()
-      });
-      return res.data;
-    } catch (err) {
-      throw new Error("APITX modifyOrder failed");
-    }
+  static async getQuotes(symbols) {
+    const results = {};
+    await Promise.all(
+      symbols.map(async (symbol) => {
+        const normalized = this.normalizeSymbol(symbol);
+        const price = await this.getPrice(normalized);
+        if (price !== null) {
+          results[normalized] = {
+            symbol: normalized,
+            price,
+            bid: price,
+            ask: price,
+            spread: 0,
+            change: 0,
+            changePercent: 0,
+            category: this.CATEGORY_BY_SYMBOL[normalized] ?? "UNKNOWN"
+          };
+        }
+      })
+    );
+    return results;
   }
-  static async closePosition(positionId) {
-    if (!process.env.APITX_API_KEY) return { id: positionId, status: "CLOSED" };
-    try {
-      const res = await import_axios.default.post(`https://api.apitx.com/v1/trading/positions/${positionId}/close`, {}, {
-        headers: this.getHeaders()
-      });
-      return res.data;
-    } catch (err) {
-      throw new Error("APITX closePosition failed");
+  static async getHistoricalCandles(symbol) {
+    const normalized = this.normalizeSymbol(symbol);
+    const cacheKey = `candles:${normalized}`;
+    const now = Date.now();
+    const cached = this.candleCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return cached.value;
     }
-  }
-  static async fetchOpenPositions(accountId) {
-    if (!process.env.APITX_API_KEY) return [];
     try {
-      const res = await import_axios.default.get(`https://api.apitx.com/v1/trading/accounts/${accountId}/positions`, {
-        headers: this.getHeaders()
+      const yahooResponse = await import_axios.default.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(normalized)}`, {
+        params: {
+          interval: "1d",
+          range: "ytd"
+        },
+        timeout: 15e3
       });
-      return res.data;
-    } catch (err) {
+      const chartResult = yahooResponse?.data?.chart?.result?.[0];
+      const quote = chartResult?.indicators?.quote?.[0];
+      let candles = [];
+      if (Array.isArray(chartResult?.timestamp) && quote) {
+        const timestamps = chartResult.timestamp;
+        const opens = Array.isArray(quote.open) ? quote.open : [];
+        const highs = Array.isArray(quote.high) ? quote.high : [];
+        const lows = Array.isArray(quote.low) ? quote.low : [];
+        const closes = Array.isArray(quote.close) ? quote.close : [];
+        candles = timestamps.map((time, index) => ({
+          time,
+          open: Number(opens[index]),
+          high: Number(highs[index]),
+          low: Number(lows[index]),
+          close: Number(closes[index])
+        })).filter((candle) => this.isValidCandle(candle));
+      }
+      if (candles.length === 0) {
+        const twelveSymbol = this.toTwelveSymbol(normalized);
+        const fallbackResponse = await import_axios.default.get(`${this.BASE_URL}/time_series`, {
+          params: {
+            symbol: twelveSymbol,
+            interval: "1min",
+            outputsize: 500,
+            apikey: this.API_KEY
+          },
+          timeout: 15e3
+        });
+        const values = Array.isArray(fallbackResponse?.data?.values) ? fallbackResponse?.data?.values : [];
+        candles = values.map((item) => {
+          const time = Math.floor(new Date(item?.datetime ?? item?.date).getTime() / 1e3);
+          return {
+            time,
+            open: Number(item?.open),
+            high: Number(item?.high),
+            low: Number(item?.low),
+            close: Number(item?.close)
+          };
+        }).filter((candle) => this.isValidCandle(candle));
+      }
+      this.candleCache.set(cacheKey, { value: candles, expiresAt: now + this.CANDLE_TTL_MS });
+      return candles;
+    } catch (error) {
+      console.error("[MarketService] Historical candles fetch failed for", normalized, error);
       return [];
-    }
-  }
-  static async fetchAccountSummary(accountId) {
-    if (!process.env.APITX_API_KEY) return null;
-    try {
-      const res = await import_axios.default.get(`https://api.apitx.com/v1/trading/accounts/${accountId}`, {
-        headers: this.getHeaders()
-      });
-      return res.data;
-    } catch (err) {
-      return null;
     }
   }
 };
 
-// src/services/marketDataService.ts
-var marketData = {
-  "EURUSD": { price: 1.085, spread: 2e-4, category: "FOREX" },
-  "GBPUSD": { price: 1.27, spread: 2e-4, category: "FOREX" },
-  "USDJPY": { price: 150.5, spread: 0.01, category: "FOREX" },
-  "BTCUSD": { price: 64000.5, spread: 1.5, category: "CRYPTO" },
-  "ETHUSD": { price: 3500.25, spread: 0.5, category: "CRYPTO" },
-  "SOLUSD": { price: 145.2, spread: 0.1, category: "CRYPTO" },
-  "XAUUSD": { price: 2350.4, spread: 0.3, category: "METALS" },
-  "XAGUSD": { price: 28.5, spread: 0.02, category: "METALS" },
-  "AAPL": { price: 175.5, spread: 0.1, category: "STOCKS" },
-  "TSLA": { price: 190.2, spread: 0.15, category: "STOCKS" }
-};
-var MarketDataService = class {
-  /**
-   * Generates a random tick price for a given symbol
-   */
-  static generateTick(symbol) {
-    const data = marketData[symbol];
-    if (!data) return null;
-    const change = data.price * (Math.random() * 2e-3 - 1e-3);
-    data.price = data.price + change;
-    return {
-      symbol,
-      bid: Number((data.price - data.spread / 2).toFixed(5)),
-      ask: Number((data.price + data.spread / 2).toFixed(5)),
-      spread: data.spread,
-      price: Number(data.price.toFixed(5)),
-      change: Number(change.toFixed(5)),
-      changePercent: Number((change / data.price * 100).toFixed(3)),
-      category: data.category
-    };
+// src/services/market.websocket.ts
+var MarketWebSocket = class {
+  static io = null;
+  static SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "XAUUSD", "BTCUSD"];
+  static intervalId = null;
+  static init(io) {
+    this.io = io;
+    io.on("connection", (socket) => {
+      socket.on("market:subscribe", (symbols) => {
+        const nextSymbols = (symbols?.length ? symbols : this.SYMBOLS).map((symbol) => symbol.toUpperCase().replace(/\//g, ""));
+        socket.join("market-feed");
+        socket.emit("market:subscribed", { symbols: nextSymbols });
+      });
+    });
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+    }
+    this.intervalId = setInterval(async () => {
+      if (!this.io) return;
+      try {
+        const quotes = await MarketService.getQuotes(this.SYMBOLS);
+        this.io.to("market-feed").emit("prices", Object.values(quotes));
+      } catch (error) {
+        console.error("[MarketWebSocket] Failed to broadcast prices", error);
+      }
+    }, 3e4);
   }
+};
+
+// src/services/marketDataService.ts
+var MarketDataService = class {
+  static DEFAULT_SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "XAUUSD", "BTCUSD"];
   static async getTickers() {
-    return Object.keys(marketData).map((sym) => this.generateTick(sym)).filter(Boolean);
+    const quotes = await this.getQuotes(this.DEFAULT_SYMBOLS);
+    return Object.entries(quotes).map(([symbol, value]) => ({
+      symbol,
+      bid: value?.bid ?? value?.price ?? 0,
+      ask: value?.ask ?? value?.price ?? 0,
+      spread: value?.spread ?? 0,
+      price: value?.price ?? 0,
+      change: value?.change ?? 0,
+      changePercent: value?.changePercent ?? 0,
+      category: value?.category ?? "UNKNOWN"
+    }));
   }
   static async getTicker(symbol) {
-    return this.generateTick(symbol);
+    const quote = await this.getQuotes([symbol]);
+    const value = quote[symbol.toUpperCase().replace(/\//g, "")];
+    if (!value) {
+      return null;
+    }
+    return {
+      symbol: value.symbol,
+      bid: value.bid ?? value.price ?? 0,
+      ask: value.ask ?? value.price ?? 0,
+      spread: value.spread ?? 0,
+      price: value.price ?? 0,
+      change: value.change ?? 0,
+      changePercent: value.changePercent ?? 0,
+      category: value.category ?? "UNKNOWN"
+    };
   }
   static async getByCategory(category) {
     const tickers = await this.getTickers();
-    return tickers.filter((t) => t?.category === category);
+    return tickers.filter((ticker) => ticker?.category === category);
   }
   static async getTopGainers() {
     const tickers = await this.getTickers();
@@ -541,45 +710,10 @@ var MarketDataService = class {
     return tickers.sort((a, b) => (a?.changePercent || 0) - (b?.changePercent || 0)).slice(0, 5);
   }
   static async getQuotes(symbols) {
-    const results = {};
-    if (process.env.APITX_API_KEY) {
-      const livePrices = await ApitxService.fetchLivePrices(symbols);
-      if (livePrices) return livePrices;
-    }
-    for (const sym of symbols) {
-      const basePrice = marketData[sym]?.price || 100;
-      const change = basePrice * (Math.random() * 2e-3 - 1e-3);
-      const newPrice = basePrice + change;
-      if (marketData[sym]) marketData[sym].price = newPrice;
-      results[sym] = {
-        price: newPrice,
-        high: newPrice * 1.02,
-        low: newPrice * 0.98,
-        open: newPrice * 0.99,
-        volume: Math.floor(Math.random() * 1e5)
-      };
-    }
-    return results;
+    return MarketService.getQuotes(symbols);
   }
   static async getChart(symbol) {
-    const basePrice = marketData[symbol]?.price || 100;
-    const history = [];
-    let currentPrice = basePrice * 0.9;
-    for (let i = 0; i < 50; i++) {
-      const open = currentPrice;
-      const close = open * (1 + (Math.random() * 0.02 - 0.01));
-      const high = Math.max(open, close) * 1.01;
-      const low = Math.min(open, close) * 0.99;
-      history.push({
-        time: Math.floor((Date.now() - (50 - i) * 6e4) / 1e3),
-        open: Math.round(open * 100) / 100,
-        high: Math.round(high * 100) / 100,
-        low: Math.round(low * 100) / 100,
-        close: Math.round(close * 100) / 100
-      });
-      currentPrice = close;
-    }
-    return history;
+    return MarketService.getHistoricalCandles(symbol);
   }
 };
 
@@ -742,8 +876,7 @@ var OrderExecutionEngine = class {
 var PriceEngine = class {
   static isRunning = false;
   static currentPrices = {};
-  static symbols = ["BTCUSD", "ETHUSD", "AAPL", "TSLA", "EURUSD"];
-  // Add more as needed
+  static symbols = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "XAUUSD", "BTCUSD"];
   static start() {
     if (this.isRunning) return;
     this.isRunning = true;
@@ -754,7 +887,7 @@ var PriceEngine = class {
       } catch (err) {
         console.error("PriceEngine tick error", err);
       }
-    }, 1e3);
+    }, 3e4);
   }
   static async updateTick() {
     const newPrices = await MarketDataService.getQuotes(this.symbols);
@@ -835,7 +968,7 @@ var import_mongoose7 = __toESM(require("mongoose"), 1);
 var TransactionSchema = new import_mongoose7.Schema(
   {
     userId: { type: import_mongoose7.Schema.Types.ObjectId, required: true, ref: "User" },
-    type: { type: String, enum: ["DEPOSIT", "WITHDRAW", "TRADE", "BONUS", "TRADE_LOSS", "ADMIN_ADJUSTMENT"], required: true },
+    type: { type: String, enum: ["DEPOSIT", "WITHDRAW", "TRADE", "BONUS", "TRADE_LOSS", "ADMIN_ADJUSTMENT", "WITHDRAWAL"], required: true },
     amount: { type: Number, required: true },
     balanceAfter: { type: Number },
     status: { type: String, enum: ["PENDING", "APPROVED", "REJECTED"], default: "PENDING" },
@@ -1674,10 +1807,10 @@ router11.post("/wallet", adminWalletControl);
 router11.post("/user", adminUserControl);
 var adminRoutes_default = router11;
 
-// src/routes/marketRoutes.ts
+// src/routes/market.routes.ts
 var import_express12 = __toESM(require("express"), 1);
 
-// src/controllers/marketController.ts
+// src/controllers/market.controller.ts
 var getTickers = async (req, res) => {
   try {
     const tickers = await MarketDataService.getTickers();
@@ -1698,66 +1831,15 @@ var getTickerBySymbol = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
-var getTopGainers = async (req, res) => {
-  try {
-    const gainers = await MarketDataService.getTopGainers();
-    res.json(gainers);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-var getTopLosers = async (req, res) => {
-  try {
-    const losers = await MarketDataService.getTopLosers();
-    res.json(losers);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-var getForex = async (req, res) => {
-  try {
-    const forex = await MarketDataService.getByCategory("FOREX");
-    res.json(forex);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-var getCrypto = async (req, res) => {
-  try {
-    const crypto = await MarketDataService.getByCategory("CRYPTO");
-    res.json(crypto);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-var getMetals = async (req, res) => {
-  try {
-    const metals = await MarketDataService.getByCategory("METALS");
-    res.json(metals);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
 var getQuotes = async (req, res) => {
   try {
     const symbolParam = req.params.symbol || req.query.symbols;
-    const symbols = symbolParam?.split(",") || ["BTCUSD", "ETHUSD", "AAPL", "TSLA"];
+    const symbols = symbolParam?.split(",").filter(Boolean) || ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "XAUUSD", "BTCUSD"];
     const quotes = await MarketDataService.getQuotes(symbols);
     res.json(quotes);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
-};
-var getSymbols = async (req, res) => {
-  res.json({
-    symbols: [
-      { symbol: "BTCUSD", name: "Bitcoin", category: "CRYPTO" },
-      { symbol: "ETHUSD", name: "Ethereum", category: "CRYPTO" },
-      { symbol: "AAPL", name: "Apple Inc.", category: "STOCKS" },
-      { symbol: "TSLA", name: "Tesla", category: "STOCKS" },
-      { symbol: "EURUSD", name: "Euro / US Dollar", category: "FOREX" }
-    ]
-  });
 };
 var getChart = async (req, res) => {
   try {
@@ -1769,39 +1851,54 @@ var getChart = async (req, res) => {
   }
 };
 
-// src/routes/marketRoutes.ts
+// src/routes/market.routes.ts
 var router12 = import_express12.default.Router();
 router12.get("/tickers", protect, getTickers);
 router12.get("/tickers/:symbol", protect, getTickerBySymbol);
 router12.get("/quotes/:symbol", protect, getQuotes);
-router12.get("/top-gainers", protect, getTopGainers);
-router12.get("/top-losers", protect, getTopLosers);
-router12.get("/forex", protect, getForex);
-router12.get("/crypto", protect, getCrypto);
-router12.get("/metals", protect, getMetals);
-router12.get("/symbols", getSymbols);
-router12.get("/chart/:symbol", getChart);
-var marketRoutes_default = router12;
+router12.get("/chart/:symbol", protect, getChart);
+var market_routes_default = router12;
 
 // src/routes/newsRoutes.ts
 var import_express13 = __toESM(require("express"), 1);
 
+// src/services/newsService.ts
+var import_axios2 = __toESM(require("axios"), 1);
+var NewsService = class {
+  static async getNews(category) {
+    const apiKey = process.env.NEWS_API_KEY;
+    if (!apiKey) {
+      return [];
+    }
+    const response = await import_axios2.default.get("https://newsapi.org/v2/top-headlines", {
+      params: {
+        category: category === "all" ? "business" : category,
+        language: "en",
+        pageSize: 10
+      },
+      headers: {
+        Authorization: `Bearer ${apiKey}`
+      }
+    });
+    return (response.data?.articles ?? []).map((article, index) => ({
+      id: article.url ?? `${category}-${index}`,
+      title: article.title ?? "Market update",
+      summary: article.description ?? "",
+      url: article.url ?? "#",
+      source: article.source?.name ?? "News API",
+      publishedAt: article.publishedAt ?? (/* @__PURE__ */ new Date()).toISOString()
+    }));
+  }
+};
+
 // src/controllers/newsController.ts
 var getNews = async (req, res) => {
   try {
-    res.json({
-      news: [
-        {
-          id: "1",
-          title: "Market Update",
-          summary: "Global markets remain stable",
-          source: "Forex Factory",
-          publishedAt: "2026-01-01T00:00:00Z"
-        }
-      ]
-    });
+    const category = String(req.query.category || "all");
+    const news = await NewsService.getNews(category);
+    res.json({ news });
   } catch (error) {
-    res.status(500).json({ error: "Failed to fetch news" });
+    res.status(500).json({ error: error.message || "Failed to fetch news" });
   }
 };
 
@@ -2031,10 +2128,18 @@ var transactionRoutes_default = router17;
 import_dotenv2.default.config({ path: "./.env" });
 console.log("MONGO URI =", process.env.MONGODB_URI);
 var app = (0, import_express18.default)();
-var allowedOrigins = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(",") : ["http://localhost:5173", "http://localhost:5174"];
+var allowedOrigins = (process.env.FRONTEND_URL ?? "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174").split(",").map((origin) => origin.trim()).filter(Boolean);
 app.use((0, import_cors.default)({
-  origin: allowedOrigins,
-  credentials: true
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error(`Origin not allowed by CORS: ${origin}`));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
 }));
 app.use(import_express18.default.json({ limit: "50mb" }));
 app.use(import_express18.default.urlencoded({ limit: "50mb", extended: true }));
@@ -2050,7 +2155,7 @@ app.use("/api/copy-trading", copyTradingRoutes_default);
 app.use("/api/watchlist", watchlistRoutes_default);
 app.use("/api/alerts", alertRoutes_default);
 app.use("/api/admin", adminRoutes_default);
-app.use("/api/market", marketRoutes_default);
+app.use("/api/market", market_routes_default);
 app.use("/api/news", newsRoutes_default);
 app.use("/api/economic-calendar", economicCalendarRoutes_default);
 app.use("/api/orders", orderRoutes_default);
@@ -2058,6 +2163,7 @@ app.use("/api/profile", profileRoutes_default);
 app.use(errorHandler);
 var server = import_http.default.createServer(app);
 SocketServer.init(server);
+MarketWebSocket.init(SocketServer.getIO());
 var start = async () => {
   await connectDatabase();
   const PORT = Number(process.env.PORT) || 8e3;

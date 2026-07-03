@@ -1,7 +1,10 @@
 import { Request, Response } from 'express';
 import { UserModel } from '../models/User';
+import { KycModel } from '../models/Kyc';
 
-export const getProfile = async (req: Request, res: Response): Promise<void> => {
+type AuthenticatedRequest = Request & { user?: any };
+
+export const getProfile = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const user = req.user;
     if (!user) {
@@ -9,14 +12,26 @@ export const getProfile = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
+    const kyc = await KycModel.findOne({ userId: user._id }).lean();
+
     res.status(200).json({
       _id: user._id,
-      name: user.fullName,
+      username: user.username,
+      name: user.fullName || user.username,
       email: user.email,
       phone: user.phone || "",
       country: user.country || "",
       avatar: user.avatar || "",
-      createdAt: user.createdAt
+      createdAt: user.createdAt,
+      kycStatus: user.kycStatus || 'UNSUBMITTED',
+      kycDetails: kyc ? {
+        status: kyc.status,
+        accountHolderName: kyc.accountHolderName || '',
+        bankName: kyc.bankName || '',
+        accountNumber: kyc.accountNumber || '',
+        ifscCode: kyc.ifscCode || '',
+        upiId: kyc.upiId || '',
+      } : null,
     });
   } catch (error: any) {
     console.error('Error fetching profile:', error);
@@ -24,7 +39,7 @@ export const getProfile = async (req: Request, res: Response): Promise<void> => 
   }
 };
 
-export const updateProfile = async (req: Request, res: Response): Promise<void> => {
+export const updateProfile = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const user = req.user;
     if (!user) {

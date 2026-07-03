@@ -8,6 +8,8 @@ import { TransactionModel } from '../models/Transaction';
 import { AuditLogModel } from '../models/AuditLog';
 import { PositionModel } from '../models/Position';
 import { NotificationModel } from '../models/Notification';
+import { SymbolModel } from '../models/Symbol';
+import { NewsModel } from '../models/News';
 import bcrypt from 'bcryptjs';
 
 const logAdminAction = async (adminId: any, action: string, details: any) => {
@@ -25,17 +27,17 @@ export const getAdminDashboardData = async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    const users = await UserModel.find().select('-password');
+    const users = await UserModel.find().select('-password -passwordHash');
     const deposits = await DepositModel.find().populate('userId', 'fullName email');
     const kycRequests = await KycModel.find().populate('userId', 'fullName email kycStatus');
     const wallets = await WalletModel.find().populate('userId', 'fullName email');
     const withdrawals = await WithdrawalModel.find().populate('userId', 'fullName email');
-    
+
     // Analytics
     const activeUsers = users.filter(u => u.status === 'ACTIVE').length;
     const startOfDay = new Date();
-    startOfDay.setHours(0,0,0,0);
-    
+    startOfDay.setHours(0, 0, 0, 0);
+
     const depositsToday = await DepositModel.find({ createdAt: { $gte: startOfDay } });
     const withdrawalsToday = await WithdrawalModel.find({ createdAt: { $gte: startOfDay } });
     const openPositions = await PositionModel.find({ status: 'OPEN' });
@@ -70,7 +72,7 @@ export const approveKyc = async (req: Request, res: Response) => {
     const { id } = req.params;
     const kyc = await KycModel.findById(id);
     if (!kyc) return res.status(404).json({ error: 'KYC not found' });
-    
+
     kyc.status = 'APPROVED';
     await kyc.save();
 
@@ -89,7 +91,7 @@ export const rejectKyc = async (req: Request, res: Response) => {
     const { id } = req.params;
     const kyc = await KycModel.findById(id);
     if (!kyc) return res.status(404).json({ error: 'KYC not found' });
-    
+
     kyc.status = 'REJECTED';
     await kyc.save();
 
@@ -190,7 +192,7 @@ export const adminUserControl = async (req: Request, res: Response) => {
 
     if (action === 'DISABLE') user.status = 'DISABLED';
     if (action === 'ENABLE') user.status = 'ACTIVE';
-    if (action === 'BLOCK_TRADING') user.status = 'TRADING_BLOCKED'; // Ensure User Schema supports this or map it
+    if (action === 'BLOCK_TRADING') user.status = 'TRADING_BLOCKED';
     if (action === 'RESET_PASSWORD' && newPassword) {
       const salt = await bcrypt.genSalt(10);
       user.password = await bcrypt.hash(newPassword, salt);
@@ -199,6 +201,165 @@ export const adminUserControl = async (req: Request, res: Response) => {
     await user.save();
     await logAdminAction((req as any).user.id, 'USER_CONTROL', { userId, action });
     res.json(user);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const getAllUsers = async (req: Request, res: Response) => {
+  try {
+    const users = await UserModel.find().select('-password -passwordHash');
+    res.json({ users });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const getKycRequests = async (req: Request, res: Response) => {
+  try {
+    const kycRequests = await KycModel.find().populate('userId', 'fullName email username kycStatus');
+    res.json({ kycRequests });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const getWithdrawals = async (req: Request, res: Response) => {
+  try {
+    const withdrawals = await WithdrawalModel.find().populate('userId', 'fullName email username');
+    res.json({ withdrawals });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const getSymbols = async (req: Request, res: Response) => {
+  try {
+    const symbols = await SymbolModel.find().sort({ symbol: 1 });
+    res.json({ symbols });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const createSymbol = async (req: Request, res: Response) => {
+  try {
+    const { symbol, name, category, price, leverageLimit, spread } = req.body;
+    if (!symbol || !name || price === undefined || leverageLimit === undefined || spread === undefined) {
+      return res.status(400).json({ error: 'Missing required symbol data' });
+    }
+
+    const normalized = String(symbol).toUpperCase().trim();
+    const existing = await SymbolModel.findOne({ symbol: normalized });
+    if (existing) {
+      return res.status(400).json({ error: 'Symbol already exists' });
+    }
+
+    const newSymbol = await SymbolModel.create({
+      symbol: normalized,
+      name,
+      category,
+      price: Number(price),
+      leverageLimit: Number(leverageLimit),
+      spread: Number(spread),
+      isActive: true,
+    });
+
+    await logAdminAction((req as any).user.id, 'CREATE_SYMBOL', { symbol: normalized });
+    res.status(201).json(newSymbol);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const toggleSymbol = async (req: Request, res: Response) => {
+  try {
+    const symbolCode = String(req.params.symbol || '').toUpperCase();
+    const symbol = await SymbolModel.findOne({ symbol: symbolCode });
+    if (!symbol) return res.status(404).json({ error: 'Symbol not found' });
+
+    symbol.isActive = !symbol.isActive;
+    await symbol.save();
+    await logAdminAction((req as any).user.id, 'TOGGLE_SYMBOL', { symbol: symbolCode, isActive: symbol.isActive });
+    res.json(symbol);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const createNews = async (req: Request, res: Response) => {
+  try {
+    const { title, summary, content, category, source } = req.body;
+    if (!title || !summary || !content || !category || !source) {
+      return res.status(400).json({ error: 'Missing required news fields' });
+    }
+
+    const news = await NewsModel.create({
+      title,
+      summary,
+      content,
+      category,
+      source,
+      authorId: (req as any).user.id
+    });
+
+    await logAdminAction((req as any).user.id, 'CREATE_NEWS', { newsId: news._id });
+    res.status(201).json(news);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const dispatchNotification = async (req: Request, res: Response) => {
+  try {
+    const { userId, title, content } = req.body;
+    if (!title || !content) {
+      return res.status(400).json({ error: 'Missing notification title or content' });
+    }
+
+    if (userId === 'ALL' || !userId) {
+      const users = await UserModel.find().select('_id');
+      const notifications = users.map((user) => ({ userId: user._id, title, message: content, type: 'INFO' }));
+      await NotificationModel.insertMany(notifications);
+      await logAdminAction((req as any).user.id, 'DISPATCH_NOTIFICATION', { target: 'ALL' });
+      return res.json({ success: true, sent: users.length });
+    }
+
+    const user = await UserModel.findById(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const notification = await NotificationModel.create({ userId, title, message: content, type: 'INFO' });
+    await logAdminAction((req as any).user.id, 'DISPATCH_NOTIFICATION', { userId, notificationId: notification._id });
+    res.json(notification);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const forceCloseTrade = async (req: Request, res: Response) => {
+  try {
+    const { posId } = req.params;
+    const position = await PositionModel.findById(posId);
+    if (!position) return res.status(404).json({ error: 'Position not found' });
+
+    if (position.status === 'CLOSED') {
+      return res.status(400).json({ error: 'Position already closed' });
+    }
+
+    position.status = 'CLOSED';
+    position.closePrice = position.currentPrice;
+    await position.save();
+
+    const wallet = await WalletModel.findOne({ userId: position.userId });
+    if (wallet) {
+      wallet.balance += position.pnl;
+      wallet.pnl -= position.pnl;
+      wallet.equity = wallet.balance + wallet.pnl;
+      await wallet.save();
+    }
+
+    await logAdminAction((req as any).user.id, 'FORCE_CLOSE_POSITION', { positionId: posId });
+    res.json(position);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

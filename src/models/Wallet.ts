@@ -7,6 +7,9 @@ export interface IWallet extends Document {
   margin: number;
   freeMargin: number;
   pnl: number;
+  status: 'ACTIVE' | 'FROZEN';
+  usedMargin?: number;
+  marginLevel?: number;
 }
 
 const WalletSchema = new Schema<IWallet>(
@@ -17,6 +20,9 @@ const WalletSchema = new Schema<IWallet>(
     margin: { type: Number, default: 0 },
     freeMargin: { type: Number, default: 0 },
     pnl: { type: Number, default: 0 },
+    status: { type: String, enum: ['ACTIVE', 'FROZEN'], default: 'ACTIVE' },
+    usedMargin: { type: Number, default: 0 },
+    marginLevel: { type: Number, default: 0 },
   },
   { timestamps: true },
 );

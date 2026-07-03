@@ -3,8 +3,6 @@ import {
     register,
     login,
     getProfile,
-    verify2FA,
-    resendOTP
 } from '../controllers/authController';
 
 import { protect } from '../middleware/authMiddleware';
@@ -28,8 +26,6 @@ router.get('/test', (req, res) => {
  */
 router.post('/register', register);
 router.post('/login', login);
-router.post('/verify-2fa', verify2FA);
-router.post('/resend-otp', resendOTP);
 
 /**
  * PROFILE ROUTE

@@ -3,11 +3,12 @@ import { WithdrawalModel } from '../models/Withdrawal';
 import { WalletModel } from '../models/Wallet';
 import { AuditLogModel } from '../models/AuditLog';
 import { TransactionModel } from '../models/Transaction';
+import { KycModel } from '../models/Kyc';
 
 export const requestWithdrawal = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
-    const { amount, bankDetails } = req.body;
+    const { amount, currency = 'USD', bankDetails } = req.body;
 
     if (!amount || amount <= 0) {
       return res.status(400).json({ error: 'Amount must be greater than 0' });
@@ -18,10 +19,25 @@ export const requestWithdrawal = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Insufficient free margin' });
     }
 
+    let payoutDetails = bankDetails;
+    if (!payoutDetails || Object.keys(payoutDetails).length === 0) {
+      const kyc = await KycModel.findOne({ userId });
+      if (!kyc || !kyc.accountNumber || !kyc.ifscCode || !kyc.bankName || !kyc.accountHolderName) {
+        return res.status(400).json({ error: 'Saved bank payout details are unavailable. Complete KYC first.' });
+      }
+      payoutDetails = {
+        accountHolderName: kyc.accountHolderName,
+        bankName: kyc.bankName,
+        accountNumber: kyc.accountNumber,
+        ifscCode: kyc.ifscCode,
+      };
+    }
+
     const withdrawal = await WithdrawalModel.create({
       userId,
       amount,
-      bankDetails,
+      currency,
+      bankDetails: payoutDetails,
       status: 'PENDING'
     });
 
@@ -36,7 +52,7 @@ export const requestWithdrawal = async (req: Request, res: Response) => {
       amount,
       status: 'PENDING',
       referenceId: withdrawal._id.toString(),
-      description: `Withdrawal request of $${amount}`
+      description: `Withdrawal request of ${amount} ${currency}`
     });
 
     await AuditLogModel.create({

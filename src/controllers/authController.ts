@@ -2,32 +2,43 @@ import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import { UserModel } from '../models/User';
 import { WalletModel } from '../models/Wallet';
+import { KycModel } from '../models/Kyc';
+import { SettingsModel } from '../models/Settings';
 import { signAccessToken, signRefreshToken } from '../utils/jwt';
 
 // Register a new user
 export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { fullName, email, password, phone } = req.body;
-    if (!fullName || !email || !password) {
+    const { username, password } = req.body;
+
+    console.log(`[REGISTER] Request body:`, req.body);
+
+    if (!username || !password) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
-    const existing = await UserModel.findOne({ email: email.toLowerCase() });
-    if (existing) {
-      return res.status(400).json({ error: 'Email already registered' });
+
+    if (typeof username !== 'string' || username.length < 4) {
+      return res.status(400).json({ error: 'Username must be at least 4 characters' });
     }
-    const hashed = await bcrypt.hash(password, 10);
-    const otpCode = "123456";
-    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 mins expiry
+
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+
+    const existing = await UserModel.findOne({ username: username.toLowerCase() });
+    if (existing) {
+      return res.status(400).json({ error: 'Username already taken' });
+    }
+
+    const hashed = await bcrypt.hash(password, 12);
 
     const user = await UserModel.create({
-      fullName,
-      email: email.toLowerCase(),
-      phone: phone || '',
-      password: hashed,
-      otpCode,
-      otpExpiresAt,
-      isOtpVerified: false,
+      username: username.toLowerCase(),
+      passwordHash: hashed,
+      role: 'user',
+      kycStatus: 'PENDING',
     });
+
     // create default wallet
     await WalletModel.create({
       userId: user._id,
@@ -37,13 +48,30 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       freeMargin: 0,
       pnl: 0,
     });
-    // TODO: Replace demo OTP with SMS OTP provider (MSG91/Twilio/Fast2SMS)
-    res.status(201).json({
-      success: true,
+
+    // create default settings
+    await SettingsModel.create({
       userId: user._id,
-      otpRequired: true,
-      demoOtp: otpCode
+      theme: 'light',
+      notifications: true,
+      language: 'en',
     });
+
+    // create KYC placeholder (status pending)
+    await KycModel.create({
+      userId: user._id,
+      status: 'PENDING',
+      documents: [],
+    });
+
+    const token = signAccessToken({ id: user._id, role: user.role });
+    const refreshToken = signRefreshToken({ id: user._id });
+    const profile: any = user.toObject();
+    delete profile.password;
+    delete profile.passwordHash;
+    profile.id = profile._id;
+
+    res.status(201).json({ success: true, message: 'Registered successfully', token, refreshToken, profile });
   } catch (err) {
     next(err);
   }
@@ -52,42 +80,32 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 // Login existing user
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Missing email or password' });
+    const { username, password: passwordInput } = req.body;
+    if (!username || !passwordInput) {
+      return res.status(400).json({ error: 'Missing username or password' });
     }
-    const user = await UserModel.findOne({ email: email.toLowerCase() });
+
+    const query = {
+      $or: [{ username: username.toLowerCase() }, { email: username.toLowerCase() }],
+    };
+    const user = await UserModel.findOne(query);
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    const match = await bcrypt.compare(password, user.password);
+
+    const hash = user.passwordHash || user.password || '';
+    const match = await bcrypt.compare(passwordInput, hash);
     if (!match) {
       return res.status(401).json({ error: 'Invalid credentials' });
-    }
-    
-    if (!user.isOtpVerified) {
-      const otpCode = "123456";
-      const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
-      user.otpCode = otpCode;
-      user.otpExpiresAt = otpExpiresAt;
-      await user.save();
-      
-      console.log(`[DEVELOPMENT] Demo OTP for Login generated: ${otpCode}`);
-
-      return res.status(200).json({
-        success: true,
-        userId: user._id,
-        otpRequired: true,
-        demoOtp: otpCode
-      });
     }
 
     const token = signAccessToken({ id: user._id, role: user.role });
     const refreshToken = signRefreshToken({ id: user._id });
-    const profile = user.toObject();
+    const profile: any = user.toObject();
     delete profile.password;
+    delete profile.passwordHash;
     profile.id = profile._id;
-    res.json({ token, refreshToken, profile });
+    res.json({ success: true, token, refreshToken, profile });
   } catch (err) {
     next(err);
   }
@@ -102,89 +120,51 @@ export const getProfile = async (req: Request, res: Response, next: NextFunction
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    const profile = user.toObject();
-    profile.id = profile._id;
-    res.json({ success: true, profile });
+    const profile: any = user.toObject();
+    const { password: _password, ...safeProfile } = profile;
+    safeProfile.id = safeProfile._id;
+    res.json({ success: true, profile: safeProfile });
   } catch (err) {
     next(err);
   }
 };
 
+// --- Deprecated Endpoints (OTP removed) ---
 export const verify2FA = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId, code } = req.body;
-    
-    if (!userId || !code) {
-      return res.status(400).json({ error: 'Missing userId or code' });
-    }
-    
-    const user = await UserModel.findById(userId);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    
-    if (user.otpCode !== code && code !== "123456") {
-      return res.status(400).json({ success: false, error: 'Invalid OTP' });
-    }
-    
-    if (user.otpExpiresAt && user.otpExpiresAt < new Date()) {
-      return res.status(400).json({ success: false, error: 'OTP expired' });
-    }
-    
-    user.isOtpVerified = true;
-    user.otpCode = undefined;
-    user.otpExpiresAt = undefined;
-    await user.save();
-    
-    const token = signAccessToken({ id: user._id, role: user.role });
-    const refreshToken = signRefreshToken({ id: user._id });
-    
-    const profile = user.toObject();
-    delete profile.password;
-    profile.id = profile._id;
-    
-    res.status(200).json({
-      success: true,
-      message: "OTP verified",
-      token,
-      refreshToken,
-      profile
-    });
+    return res.status(400).json({ error: 'This endpoint is deprecated - use /login instead' });
   } catch (err) {
     next(err);
   }
 };
 
-// Resend OTP
 export const resendOTP = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId } = req.body;
-    if (!userId) {
-      return res.status(400).json({ error: 'Missing userId' });
-    }
-    
-    const user = await UserModel.findById(userId);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    
-    if (user.isOtpVerified) {
-      return res.status(400).json({ error: 'User is already verified' });
-    }
-    
-    const otpCode = "123456";
-    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    user.otpCode = otpCode;
-    user.otpExpiresAt = otpExpiresAt;
-    await user.save();
-    
-    console.log(`[DEVELOPMENT] Resend Demo OTP generated: ${otpCode}`);
+    return res.status(400).json({ error: 'This endpoint is deprecated - OTP removed' });
+  } catch (err) {
+    next(err);
+  }
+};
 
-    res.status(200).json({
-      success: true,
-      message: "OTP sent successfully",
-      demoOtp: otpCode
-    });
+export const forgotPasswordStart = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    return res.status(400).json({ error: 'This endpoint is deprecated' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const forgotPasswordGenerateOTP = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    return res.status(400).json({ error: 'This endpoint is deprecated - OTP removed' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const forgotPasswordReset = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    return res.status(400).json({ error: 'This endpoint is deprecated' });
   } catch (err) {
     next(err);
   }

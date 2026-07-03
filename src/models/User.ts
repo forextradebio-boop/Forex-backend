@@ -1,42 +1,50 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IUser extends Document {
-  fullName: string;
-  email: string;
+  username: string;
+  fullName?: string;
+  email?: string;
   phone?: string;
   country?: string;
   avatar?: string;
-  password: string;
-  role: 'USER' | 'ADMIN';
-  status: 'ACTIVE' | 'BANNED' | 'SUSPENDED';
+  password?: string; // legacy, kept for backward compatibility
+  passwordHash?: string; // preferred field
+  role: string;
+  status: 'ACTIVE' | 'BANNED' | 'SUSPENDED' | 'DISABLED' | 'TRADING_BLOCKED';
   kycStatus: 'UNSUBMITTED' | 'PENDING' | 'APPROVED' | 'REJECTED';
-  otpCode?: string;
-  otpExpiresAt?: Date;
-  isOtpVerified: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
 
 const UserSchema = new Schema<IUser>(
   {
-    fullName: { type: String, required: true },
-    email: { type: String, required: true, unique: true },
+    username: { type: String, required: true, unique: true, minlength: 4 },
+    fullName: { type: String },
+    email: { type: String, unique: true, sparse: true },
     phone: { type: String },
     country: { type: String },
     avatar: { type: String },
-    password: { type: String, required: true },
-    role: { type: String, enum: ['USER', 'ADMIN'], default: 'USER' },
-    status: { type: String, enum: ['ACTIVE', 'BANNED', 'SUSPENDED'], default: 'ACTIVE' },
+    // Keep legacy `password` for older code, but prefer `passwordHash`
+    password: { type: String },
+    passwordHash: { type: String },
+    role: { type: String, default: 'user' },
+    status: { type: String, enum: ['ACTIVE', 'BANNED', 'SUSPENDED', 'DISABLED', 'TRADING_BLOCKED'], default: 'ACTIVE' },
     kycStatus: {
       type: String,
       enum: ['UNSUBMITTED', 'PENDING', 'APPROVED', 'REJECTED'],
-      default: 'UNSUBMITTED',
+      default: 'PENDING',
     },
-    otpCode: { type: String },
-    otpExpiresAt: { type: Date },
-    isOtpVerified: { type: Boolean, default: false },
   },
   { timestamps: true },
 );
+
+// Ensure when reading out user objects we don't expose password fields
+UserSchema.set('toJSON', {
+  transform: function (doc, ret, options) {
+    delete ret.password;
+    delete ret.passwordHash;
+    return ret;
+  },
+});
 
 export const UserModel = mongoose.model<IUser>('User', UserSchema);

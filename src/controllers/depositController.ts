@@ -5,10 +5,16 @@ import { TransactionModel } from '../models/Transaction';
 export const createDeposit = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
-    const { amount, utr, screenshot } = req.body;
+    const { amount, currency = 'USD', paymentMethod = 'UPI', utr, screenshot } = req.body;
     
     if (!amount || amount <= 0) {
       return res.status(400).json({ error: 'Amount must be greater than 0' });
+    }
+    if (!currency) {
+      return res.status(400).json({ error: 'Currency is required' });
+    }
+    if (!['UPI', 'NETBANKING'].includes(paymentMethod)) {
+      return res.status(400).json({ error: 'Payment method must be UPI or NETBANKING' });
     }
     if (!utr) {
       return res.status(400).json({ error: 'UTR is required' });
@@ -17,6 +23,8 @@ export const createDeposit = async (req: Request, res: Response) => {
     const deposit = await DepositModel.create({
       userId,
       amount,
+      currency,
+      paymentMethod,
       utr,
       screenshot,
       status: 'PENDING'
@@ -28,7 +36,7 @@ export const createDeposit = async (req: Request, res: Response) => {
       amount,
       status: 'PENDING',
       referenceId: deposit._id.toString(),
-      description: `Deposit request of $${amount} via UTR ${utr}`
+      description: `Deposit request of ${currency} ${amount} via ${paymentMethod} UTR ${utr}`
     });
     
     res.status(201).json(deposit);

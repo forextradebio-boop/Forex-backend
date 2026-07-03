@@ -1,4 +1,4 @@
-import { MarketDataService } from './marketDataService';
+import { MarketService } from './market.service';
 import { SocketServer } from './socketServer';
 import { PositionModel } from '../models/Position';
 import { OrderModel } from '../models/Order';
@@ -10,13 +10,15 @@ import { WalletModel } from '../models/Wallet';
 export class PriceEngine {
   private static isRunning = false;
   private static currentPrices: Record<string, any> = {};
-  private static symbols = ['BTCUSD', 'ETHUSD', 'AAPL', 'TSLA', 'EURUSD']; // Add more as needed
+  private static symbols = MarketService.getWatchSymbols();
 
   static start() {
     if (this.isRunning) return;
     this.isRunning = true;
     console.log('PriceEngine started');
-    
+
+    void this.updateTick();
+
     setInterval(async () => {
       try {
         await this.updateTick();
@@ -27,17 +29,34 @@ export class PriceEngine {
   }
 
   private static async updateTick() {
-    // 1. Fetch live prices
-    const newPrices = await MarketDataService.getQuotes(this.symbols);
+    const newPrices = await MarketService.getQuotes(this.symbols);
+    const changedQuotes = Object.entries(newPrices)
+      .filter(([symbol, quote]) => {
+        const previous = this.currentPrices[symbol];
+        if (!previous) return true;
+
+        return (
+          previous.price !== quote.price ||
+          previous.bid !== quote.bid ||
+          previous.ask !== quote.ask ||
+          previous.high !== quote.high ||
+          previous.low !== quote.low ||
+          previous.open !== quote.open
+        );
+      })
+      .map(([symbol, quote]) => ({ symbol, ...quote }));
+
     this.currentPrices = { ...this.currentPrices, ...newPrices };
 
-    // 2. Broadcast prices
-    SocketServer.broadcastPrices(
-      Object.keys(this.currentPrices).map(sym => ({
-        symbol: sym,
-        ...this.currentPrices[sym]
-      }))
-    );
+    if (changedQuotes.length > 0) {
+      SocketServer.broadcastMarketUpdate(changedQuotes);
+      SocketServer.broadcastPrices(
+        Object.keys(this.currentPrices).map((sym) => ({
+          symbol: sym,
+          ...this.currentPrices[sym],
+        }))
+      );
+    }
 
     // 3. Update PNL, StopLoss, Orders for all users
     const openPositions = await PositionModel.find({ status: 'OPEN' });

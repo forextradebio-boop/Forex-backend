@@ -8,8 +8,10 @@ export class RiskEngine {
     const wallet = await WalletModel.findOne({ userId });
     if (!wallet) return;
 
+    const marginLevel = wallet.marginLevel ?? 0;
+
     // Check margin call
-    if (wallet.marginLevel > 0 && wallet.marginLevel < 50) {
+    if (marginLevel > 0 && marginLevel < 50) {
       // Margin Call
       await NotificationModel.create({
         userId,
@@ -20,7 +22,7 @@ export class RiskEngine {
     }
 
     // Check auto liquidation (margin level < 20%)
-    if (wallet.marginLevel > 0 && wallet.marginLevel < 20) {
+    if (marginLevel > 0 && marginLevel < 20) {
       // Auto liquidate all open positions
       const openPositions = await PositionModel.find({ userId, status: 'OPEN' });
       for (const pos of openPositions) {

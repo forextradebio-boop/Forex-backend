@@ -23,7 +23,9 @@ export class ApitxService {
   }
 
   static async placeOrder(payload: any) {
-    if (!process.env.APITX_API_KEY) return { id: 'mock_' + Date.now(), status: 'FILLED' }; // Fallback for local testing
+    if (!process.env.APITX_API_KEY) {
+      throw new Error('APITX API key is not configured');
+    }
     try {
       const res = await axios.post('https://api.apitx.com/v1/trading/orders', payload, {
         headers: this.getHeaders()
@@ -35,7 +37,9 @@ export class ApitxService {
   }
 
   static async modifyOrder(orderId: string, payload: any) {
-    if (!process.env.APITX_API_KEY) return { id: orderId, status: 'MODIFIED' };
+    if (!process.env.APITX_API_KEY) {
+      throw new Error('APITX API key is not configured');
+    }
     try {
       const res = await axios.put(`https://api.apitx.com/v1/trading/orders/${orderId}`, payload, {
         headers: this.getHeaders()
@@ -47,7 +51,9 @@ export class ApitxService {
   }
 
   static async closePosition(positionId: string) {
-    if (!process.env.APITX_API_KEY) return { id: positionId, status: 'CLOSED' };
+    if (!process.env.APITX_API_KEY) {
+      throw new Error('APITX API key is not configured');
+    }
     try {
       const res = await axios.post(`https://api.apitx.com/v1/trading/positions/${positionId}/close`, {}, {
         headers: this.getHeaders()
@@ -59,7 +65,9 @@ export class ApitxService {
   }
 
   static async fetchOpenPositions(accountId: string) {
-    if (!process.env.APITX_API_KEY) return [];
+    if (!process.env.APITX_API_KEY) {
+      return [];
+    }
     try {
       const res = await axios.get(`https://api.apitx.com/v1/trading/accounts/${accountId}/positions`, {
         headers: this.getHeaders()
@@ -71,7 +79,9 @@ export class ApitxService {
   }
 
   static async fetchAccountSummary(accountId: string) {
-    if (!process.env.APITX_API_KEY) return null;
+    if (!process.env.APITX_API_KEY) {
+      return null;
+    }
     try {
       const res = await axios.get(`https://api.apitx.com/v1/trading/accounts/${accountId}`, {
         headers: this.getHeaders()

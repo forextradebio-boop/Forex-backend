@@ -5,8 +5,9 @@ export class AiRiskEngine {
     const wallet = await WalletModel.findOne({ userId });
     if (!wallet) return null;
 
+    const marginLevel = wallet.marginLevel ?? 0;
     let riskScore = 0;
-    if (wallet.marginLevel > 0 && wallet.marginLevel < 100) {
+    if (marginLevel > 0 && marginLevel < 100) {
       riskScore += 50;
     }
     
