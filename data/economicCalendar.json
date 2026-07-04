@@ -1,0 +1,193 @@
+{
+  "calendar": [
+    {
+      "date": "2026-06-28",
+      "time": "8:15am",
+      "currency": "",
+      "event": "",
+      "actual": "",
+      "forecast": "",
+      "previous": ""
+    },
+    {
+      "date": "2026-06-28",
+      "time": "12:35pm",
+      "currency": "",
+      "event": "",
+      "actual": "",
+      "forecast": "",
+      "previous": ""
+    },
+    {
+      "date": "2026-06-28",
+      "time": "7:30pm",
+      "currency": "",
+      "event": "",
+      "actual": "",
+      "forecast": "",
+      "previous": ""
+    },
+    {
+      "date": "2026-06-28",
+      "time": "7:50pm",
+      "currency": "",
+      "event": "",
+      "actual": "5.3%",
+      "forecast": "3.1%",
+      "previous": "2.8%"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "1:00am",
+      "currency": "",
+      "event": "",
+      "actual": "",
+      "forecast": "",
+      "previous": ""
+    },
+    {
+      "date": "2026-06-29",
+      "time": "All Day",
+      "currency": "",
+      "event": "",
+      "actual": "",
+      "forecast": "",
+      "previous": ""
+    },
+    {
+      "date": "2026-06-29",
+      "time": "3:00am",
+      "currency": "",
+      "event": "",
+      "actual": "3.2%",
+      "forecast": "3.2%",
+      "previous": "3.2%"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "4:00am",
+      "currency": "",
+      "event": "",
+      "actual": "3.2%",
+      "forecast": "2.7%",
+      "previous": "2.7%"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "4:00am",
+      "currency": "",
+      "event": "",
+      "actual": "3.1%",
+      "forecast": "2.9%",
+      "previous": "3.0%"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "4:30am",
+      "currency": "",
+      "event": "",
+      "actual": "0.1%",
+      "forecast": "0.2%",
+      "previous": "0.2%"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "4:30am",
+      "currency": "",
+      "event": "",
+      "actual": "56K",
+      "forecast": "63K",
+      "previous": "66K"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "4:30am",
+      "currency": "",
+      "event": "",
+      "actual": "4.6B",
+      "forecast": "6.0B",
+      "previous": "6.2B"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "3:00pm",
+      "currency": "",
+      "event": "",
+      "actual": "",
+      "forecast": "",
+      "previous": ""
+    },
+    {
+      "date": "2026-06-29",
+      "time": "7:01pm",
+      "currency": "",
+      "event": "",
+      "actual": "1.2%",
+      "forecast": "1.2%",
+      "previous": "1.2%"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "7:30pm",
+      "currency": "",
+      "event": "",
+      "actual": "2.5%",
+      "forecast": "2.5%",
+      "previous": "2.5%"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "7:50pm",
+      "currency": "",
+      "event": "",
+      "actual": "0.5%",
+      "forecast": "0.6%",
+      "previous": "0.5%"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "9:00pm",
+      "currency": "",
+      "event": "",
+      "actual": "36.6",
+      "forecast": "",
+      "previous": "10.0"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "9:30pm",
+      "currency": "",
+      "event": "",
+      "actual": "",
+      "forecast": "",
+      "previous": ""
+    },
+    {
+      "date": "2026-06-29",
+      "time": "9:30pm",
+      "currency": "",
+      "event": "",
+      "actual": "0.7%",
+      "forecast": "0.6%",
+      "previous": "0.7%"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "9:30pm",
+      "currency": "",
+      "event": "",
+      "actual": "50.3",
+      "forecast": "50.1",
+      "previous": "50.0"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "9:30pm",
+      "currency": "",
+      "event": "",
+      "actual": "50.2",
+      "forecast": "49.9",
+      "previous": "50.1"
+    }
+  ]
+}
