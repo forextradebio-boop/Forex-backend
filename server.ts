@@ -27,6 +27,8 @@ import economicCalendarRoutes from './src/routes/economicCalendarRoutes';
 import orderRoutes from './src/routes/orderRoutes';
 import profileRoutes from './src/routes/profileRoutes';
 import transactionRoutes from './src/routes/transactionRoutes';
+import { protect } from './src/middleware/authMiddleware';
+import { getClosedPositions } from './src/controllers/tradingController';
 
 console.log("MONGO URI =", process.env.MONGODB_URI);
 
@@ -72,6 +74,8 @@ app.use('/api/withdrawals', withdrawalRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/kyc', kycRoutes);
 app.use('/api/trading', tradingRoutes);
+app.get('/api/trading/closed-positions', protect, getClosedPositions);
+app.get('/api/trading/positions/closed', protect, getClosedPositions);
 app.use('/api/copy-trading', copyTradingRoutes);
 app.use('/api/watchlist', watchlistRoutes);
 app.use('/api/alerts', alertRoutes);
