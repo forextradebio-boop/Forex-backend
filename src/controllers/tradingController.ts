@@ -6,8 +6,22 @@ import { WalletModel } from '../models/Wallet';
 export const getPositions = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
-    const positions = await PositionModel.find({ userId });
+    const positions = await PositionModel.find({ userId, status: 'OPEN' });
     res.json(positions);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const getClosedPositions = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    const closedPositions = await PositionModel.find({ userId, status: 'CLOSED' }).sort({ updatedAt: -1 });
+    const history = closedPositions.map((position) => ({
+      ...position.toObject(),
+      id: position._id.toString(),
+    }));
+    res.json(history);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
