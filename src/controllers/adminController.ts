@@ -11,6 +11,7 @@ import { NotificationModel } from '../models/Notification';
 import { SymbolModel } from '../models/Symbol';
 import { NewsModel } from '../models/News';
 import bcrypt from 'bcryptjs';
+import { MarginEngine } from '../services/marginEngine';
 
 const logAdminAction = async (adminId: any, action: string, details: any) => {
   await AuditLogModel.create({ adminId, action, details });
@@ -147,6 +148,9 @@ export const rejectWithdrawal = async (req: Request, res: Response) => {
     if (wallet) {
       wallet.balance += withdrawal.amount; // refund
       await wallet.save();
+      // Recalculate wallet metrics
+      const openPositions = await PositionModel.find({ userId: withdrawal.userId, status: 'OPEN' });
+      await MarginEngine.calculateMargin(withdrawal.userId.toString(), openPositions, {});
     }
 
     await logAdminAction((req as any).user.id, 'REJECT_WITHDRAWAL', { withdrawalId: id });
@@ -177,6 +181,9 @@ export const adminWalletControl = async (req: Request, res: Response) => {
     }
 
     await wallet.save();
+    // Recalculate wallet after admin changes
+    const openPositions = await PositionModel.find({ userId, status: 'OPEN' });
+    await MarginEngine.calculateMargin(userId, openPositions, {});
     await logAdminAction((req as any).user.id, 'WALLET_CONTROL', { userId, action, amount });
     res.json(wallet);
   } catch (error: any) {
@@ -354,8 +361,9 @@ export const forceCloseTrade = async (req: Request, res: Response) => {
     if (wallet) {
       wallet.balance += position.pnl;
       wallet.pnl -= position.pnl;
-      wallet.equity = wallet.balance + wallet.pnl;
       await wallet.save();
+      const openPositions = await PositionModel.find({ userId: position.userId, status: 'OPEN' });
+      await MarginEngine.calculateMargin(position.userId.toString(), openPositions, {});
     }
 
     await logAdminAction((req as any).user.id, 'FORCE_CLOSE_POSITION', { positionId: posId });

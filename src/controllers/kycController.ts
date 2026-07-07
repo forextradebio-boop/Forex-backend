@@ -37,6 +37,33 @@ export const submitKyc = async (req: Request, res: Response) => {
       ifscCode,
       upiId
     } = req.body;
+
+    // Helper: max allowed file size for embedded base64 (per file)
+    const MAX_FILE_SIZE_BYTES = Number(process.env.KYC_MAX_FILE_BYTES) || 5 * 1024 * 1024; // default 5MB
+
+    // Helper to extract base64 payload from data URI and compute its byte size
+    const getBase64Payload = (dataUri: string) => {
+      if (!dataUri || typeof dataUri !== 'string') return null;
+      const match = dataUri.match(/^data:([\w/+.-]+);base64,(.*)$/s);
+      return match ? match[2] : null;
+    };
+
+    // Helper to save base64 data to file and return stored path/URL
+    const saveBase64ToFile = (dataUri: string, filePrefix: string) => {
+      const payload = getBase64Payload(dataUri);
+      if (!payload) return null;
+      const buffer = Buffer.from(payload, 'base64');
+      const uploadsDir = path.join(process.cwd(), 'uploads', 'kyc');
+      if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+      const extMatch = dataUri.match(/^data:image\/(\w+);base64,/);
+      const ext = extMatch ? extMatch[1] : 'bin';
+      const fileName = `${filePrefix}_${Date.now()}_${Math.floor(Math.random()*10000)}.${ext}`;
+      const filePath = path.join(uploadsDir, fileName);
+      fs.writeFileSync(filePath, buffer);
+      const baseUrl = process.env.UPLOAD_BASE_URL || '';
+      const rel = path.relative(path.join(process.cwd(), 'uploads'), filePath).split(path.sep).join('/');
+      return baseUrl ? `${baseUrl}/uploads/${rel}` : `/uploads/${rel}`;
+    };
     
     // Validate required fields
     const missingFields = [];
@@ -55,18 +82,42 @@ export const submitKyc = async (req: Request, res: Response) => {
     }
 
     console.log(`[KYC POST] Processing submission for user ${userId}`);
+
+    // Validate and (if data URI) save documents to disk instead of storing huge base64 in DB
+    const processDocument = (doc: any, fieldName: string) => {
+      if (!doc || typeof doc !== 'string') return doc || null;
+      // If it's a data URI, evaluate size
+      if (doc.startsWith('data:')) {
+        const payload = getBase64Payload(doc);
+        if (!payload) return null;
+        const estimatedBytes = Buffer.byteLength(payload, 'base64');
+        console.log(`[KYC POST] ${fieldName} size bytes:`, estimatedBytes);
+        if (estimatedBytes > MAX_FILE_SIZE_BYTES) {
+          const err = new Error(`${fieldName} exceeds maximum allowed size of ${MAX_FILE_SIZE_BYTES} bytes`);
+          (err as any).statusCode = 413;
+          throw err;
+        }
+        // Save to file and return accessible URL
+        return saveBase64ToFile(doc, fieldName);
+      }
+      // If it's already a URL/path, keep as-is
+      return doc;
+    };
     
     let kyc = await KycModel.findOne({ userId });
     console.log('[KYC POST] Existing KYC record found:', kyc ? kyc._id : 'none');
 
     if (kyc) {
       console.log('[KYC POST] Updating existing KYC record:', kyc._id);
-      
+      // process documents (may throw if too large)
+      const storedAadhar = processDocument(aadharDocument, 'aadharDocument');
+      const storedPan = processDocument(panDocument, 'panDocument');
+
       const updatePayload = {
         aadharNumber,
-        aadharDocument,
+        aadharDocument: storedAadhar,
         panNumber,
-        panDocument,
+        panDocument: storedPan,
         accountHolderName,
         bankName,
         accountNumber,
@@ -87,12 +138,16 @@ export const submitKyc = async (req: Request, res: Response) => {
       kyc = updatedKyc;
     } else {
       console.log('[KYC POST] Creating new KYC record');
+      // process documents (may throw if too large)
+      const storedAadhar = processDocument(aadharDocument, 'aadharDocument');
+      const storedPan = processDocument(panDocument, 'panDocument');
+
       const kycData = {
         userId,
         aadharNumber,
-        aadharDocument,
+        aadharDocument: storedAadhar,
         panNumber,
-        panDocument,
+        panDocument: storedPan,
         accountHolderName,
         bankName,
         accountNumber,
@@ -120,7 +175,7 @@ export const submitKyc = async (req: Request, res: Response) => {
     res.status(200).json({ 
       success: true,
       message: 'KYC submitted successfully',
-      kyc: kyc.toObject()
+      kyc: kyc ? kyc.toObject() : null
     });
   } catch (error: any) {
     console.error('[KYC POST] Error occurred:', error);

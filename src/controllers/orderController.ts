@@ -39,7 +39,13 @@ export const createOrder = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
     const { symbol, type, volume, price, targetPrice, status } = req.body;
-    
+    // Basic protection: ensure wallet exists and isn't frozen before creating immediate orders
+    const { WalletModel } = await import('../models/Wallet');
+    const wallet = await WalletModel.findOne({ userId });
+    if (wallet && wallet.status === 'FROZEN') {
+      return res.status(403).json({ error: 'Trading disabled: wallet frozen' });
+    }
+
     const order = await OrderModel.create({
       userId,
       symbol,
@@ -49,7 +55,7 @@ export const createOrder = async (req: Request, res: Response) => {
       targetPrice: targetPrice || price || 0,
       status: status || 'PENDING'
     });
-    
+
     res.status(201).json(order);
   } catch (error: any) {
     res.status(500).json({ error: error.message });

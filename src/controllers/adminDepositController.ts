@@ -66,6 +66,8 @@ export const approveDeposit = async (req: Request, res: Response) => {
         type: 'DEPOSIT',
         amount: deposit.amount,
         balanceAfter: wallet.balance,
+        status: 'APPROVED',
+        referenceId: deposit._id.toString(),
         description: 'Deposit Approved by Admin'
       }], { session });
     }
