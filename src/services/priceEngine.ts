@@ -25,7 +25,7 @@ export class PriceEngine {
       } catch (err) {
         console.error('PriceEngine tick error', err);
       }
-    }, 1000);
+    }, 250);
   }
 
   private static async updateTick() {

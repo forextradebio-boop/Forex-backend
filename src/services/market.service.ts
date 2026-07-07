@@ -6,7 +6,7 @@ export class MarketService {
     'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'NZDUSD',
     'EURJPY', 'EURGBP', 'GBPJPY', 'XAUUSD', 'XAGUSD', 'BTCUSD', 'ETHUSD',
   ];
-  private static readonly PRICE_TTL_MS = 5000;
+  private static readonly PRICE_TTL_MS = 250;
   private static readonly CANDLE_TTL_MS = 60000;
   private static readonly priceCache = new Map<string, { value: any; expiresAt: number }>();
   private static readonly candleCache = new Map<string, { value: any; expiresAt: number }>();

@@ -22,6 +22,9 @@ export class CommissionEngine {
         if (wallet) {
           wallet.balance += earned;
           await wallet.save();
+          // Recalculate wallet metrics
+          const openPositions = await PositionModel.find({ userId: ib.userId, status: 'OPEN' });
+          await (await import('./marginEngine')).MarginEngine.calculateMargin(ib.userId.toString(), openPositions, {});
 
           await TransactionModel.create({
             userId: ib.userId,
