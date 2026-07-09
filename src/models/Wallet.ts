@@ -33,7 +33,7 @@ WalletSchema.pre('save', async function () {
   this.balance = Math.max(0, roundToTwo(this.balance));
   this.equity = Math.max(0, roundToTwo(this.equity));
   this.margin = Math.max(0, roundToTwo(this.margin));
-  this.pnl = roundToTwo(this.pnl);
+  this.pnl = this.pnl;
 
   // Calculate freeMargin and clamp to 0
   this.freeMargin = Math.max(0, roundToTwo(this.equity - this.margin));
@@ -45,7 +45,7 @@ WalletSchema.pre('findOneAndUpdate', async function () {
     if (update.$set.balance !== undefined) update.$set.balance = Math.max(0, roundToTwo(update.$set.balance));
     if (update.$set.equity !== undefined) update.$set.equity = Math.max(0, roundToTwo(update.$set.equity));
     if (update.$set.margin !== undefined) update.$set.margin = Math.max(0, roundToTwo(update.$set.margin));
-    if (update.$set.pnl !== undefined) update.$set.pnl = roundToTwo(update.$set.pnl);
+    if (update.$set.pnl !== undefined) update.$set.pnl = update.$set.pnl;
 
     // If equity or margin is updated, recalculate free margin
     if (update.$set.equity !== undefined || update.$set.margin !== undefined) {
