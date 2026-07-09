@@ -13,6 +13,7 @@ import {
   getSymbols,
   createSymbol,
   toggleSymbol,
+  modifySymbol,
   createNews,
   dispatchNotification,
   forceCloseTrade
@@ -53,6 +54,7 @@ router.post('/withdrawals/:id/reject', rejectWithdrawal);
 // Market and symbol management
 router.post('/symbols', createSymbol);
 router.post('/symbols/:symbol/toggle', toggleSymbol);
+router.post('/symbols/:symbol/modify', modifySymbol);
 
 // News and notifications
 router.post('/news', createNews);

@@ -10,6 +10,9 @@ export interface IPosition extends Document {
   sl?: number;
   tp?: number;
   pnl: number;
+  commission: number;
+  swap: number;
+  marginUsed: number;
   status: 'OPEN' | 'CLOSED';
   closePrice?: number;
   createdAt: Date;
@@ -27,6 +30,9 @@ const PositionSchema = new Schema<IPosition>(
     sl: { type: Number },
     tp: { type: Number },
     pnl: { type: Number, default: 0 },
+    commission: { type: Number, default: 0 },
+    swap: { type: Number, default: 0 },
+    marginUsed: { type: Number, default: 0 },
     status: { type: String, enum: ['OPEN', 'CLOSED'], default: 'OPEN' },
     closePrice: { type: Number },
   },

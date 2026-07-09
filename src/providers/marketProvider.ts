@@ -88,7 +88,7 @@ export class MarketProvider {
     const open = Number(meta?.regularMarketOpen ?? quote?.open?.slice(-1)?.[0] ?? price);
     const volume = Number(quote?.volume?.slice(-1)?.[0] ?? 0);
 
-    return {
+    const parsedObject = {
       symbol: normalized,
       price,
       bid,
@@ -105,6 +105,17 @@ export class MarketProvider {
       volume: Number.isFinite(volume) ? volume : 0,
       timestamp: Date.now(),
     };
+
+    if (normalized === 'XAUUSD' || normalized === 'XAGUSD') {
+      console.log(`\n====================================================`);
+      console.log(`--- RAW JSON FROM YAHOO FINANCE (${rapidApiSymbol}) ---`);
+      console.log(JSON.stringify(meta, null, 2));
+      console.log(`\n--- PARSED OBJECT (${normalized}) ---`);
+      console.log(JSON.stringify(parsedObject, null, 2));
+      console.log(`====================================================\n`);
+    }
+
+    return parsedObject;
   }
 
   public static async fetchHistoricalCandles(symbol: string, timeframe: string = 'D1'): Promise<CandlePoint[]> {

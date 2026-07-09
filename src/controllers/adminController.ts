@@ -294,6 +294,28 @@ export const toggleSymbol = async (req: Request, res: Response) => {
   }
 };
 
+export const modifySymbol = async (req: Request, res: Response) => {
+  try {
+    const symbolCode = String(req.params.symbol || '').toUpperCase();
+    const { leverageLimit, spread, minLot, maxLot, lotStep } = req.body;
+    
+    const symbol = await SymbolModel.findOne({ symbol: symbolCode });
+    if (!symbol) return res.status(404).json({ error: 'Symbol not found' });
+
+    if (leverageLimit !== undefined) symbol.leverageLimit = Number(leverageLimit);
+    if (spread !== undefined) symbol.spread = Number(spread);
+    if (minLot !== undefined) symbol.minLot = Number(minLot);
+    if (maxLot !== undefined) symbol.maxLot = Number(maxLot);
+    if (lotStep !== undefined) symbol.lotStep = Number(lotStep);
+    
+    await symbol.save();
+    await logAdminAction((req as any).user.id, 'MODIFY_SYMBOL', { symbol: symbolCode, updates: req.body });
+    res.json(symbol);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 export const createNews = async (req: Request, res: Response) => {
   try {
     const { title, summary, content, category, source } = req.body;
@@ -353,14 +375,30 @@ export const forceCloseTrade = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Position already closed' });
     }
 
+    const { MarketService } = await import('../services/market.service');
+    const { TradeUtils } = await import('../services/tradeUtils');
+    const quote = await MarketService.getQuote(position.symbol);
+    if (!quote) return res.status(503).json({ error: 'Market data unavailable' });
+
     position.status = 'CLOSED';
-    position.closePrice = position.currentPrice;
+    position.closePrice = position.type === 'BUY' ? quote.bid : quote.ask;
+    
+    const sym = await SymbolModel.findOne({ symbol: position.symbol.toUpperCase() });
+    
+    position.pnl = ProfitCalculator.calculate(
+      position.type,
+      position.openPrice,
+      position.closePrice,
+      position.closePrice,
+      position.volume,
+      position.symbol
+    );
     await position.save();
 
     const wallet = await WalletModel.findOne({ userId: position.userId });
     if (wallet) {
       wallet.balance += position.pnl;
-      wallet.pnl -= position.pnl;
+      wallet.equity = wallet.balance;
       await wallet.save();
       const openPositions = await PositionModel.find({ userId: position.userId, status: 'OPEN' });
       await MarginEngine.calculateMargin(position.userId.toString(), openPositions, {});

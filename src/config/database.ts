@@ -10,11 +10,15 @@ export const connectDatabase = async () => {
       const { MongoMemoryServer } = await import('mongodb-memory-server');
       mongoServer = await MongoMemoryServer.create();
       const uri = mongoServer.getUri();
-      await mongoose.connect(uri);
+      await mongoose.connect(uri, {
+        serverSelectionTimeoutMS: 5000,
+        socketTimeoutMS: 45000,
+      });
       console.log('MongoDB Connected Successfully (in-memory)');
     } else {
       await mongoose.connect(config.mongoUri, {
-        // useNewUrlParser and useUnifiedTopology are default in Mongoose 6+
+        serverSelectionTimeoutMS: 5000,
+        socketTimeoutMS: 45000,
       });
       console.log('MongoDB Connected Successfully');
     }

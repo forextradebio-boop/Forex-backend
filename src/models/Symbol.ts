@@ -7,6 +7,11 @@ export interface ISymbol extends Document {
   price: number;
   leverageLimit: number;
   spread: number;
+  contractSize: number;
+  digits: number;
+  minLot: number;
+  maxLot: number;
+  lotStep: number;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -20,6 +25,11 @@ const SymbolSchema = new Schema<ISymbol>(
     price: { type: Number, required: true, default: 0 },
     leverageLimit: { type: Number, required: true, default: 100 },
     spread: { type: Number, required: true, default: 1 },
+    contractSize: { type: Number, required: true, default: 100000 },
+    digits: { type: Number, required: true, default: 5 },
+    minLot: { type: Number, required: true, default: 0.01 },
+    maxLot: { type: Number, required: true, default: 100 },
+    lotStep: { type: Number, required: true, default: 0.01 },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }
