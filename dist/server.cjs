@@ -79,6 +79,519 @@ var init_Wallet = __esm({
   }
 });
 
+// src/providers/rapidApiClient.ts
+var import_axios, import_dotenv2, RapidApiClient;
+var init_rapidApiClient = __esm({
+  "src/providers/rapidApiClient.ts"() {
+    "use strict";
+    import_axios = __toESM(require("axios"), 1);
+    import_dotenv2 = __toESM(require("dotenv"), 1);
+    import_dotenv2.default.config({ path: "./.env" });
+    RapidApiClient = class _RapidApiClient {
+      static instance;
+      client;
+      baseUrl;
+      constructor() {
+        const apiKey = process.env.RAPID_API_KEY || process.env.RAPIDAPI_KEY;
+        const apiHost = process.env.RAPID_API_HOST || "query1.finance.yahoo.com";
+        this.baseUrl = `https://${apiHost}`;
+        if (!apiKey) {
+          throw new Error("RapidAPI Key is not configured in .env");
+        }
+        const factory = import_axios.default.create;
+        const createdClient = factory ? factory({
+          baseURL: this.baseUrl,
+          timeout: 1e4,
+          headers: {
+            "x-rapidapi-host": apiHost,
+            "x-rapidapi-key": apiKey,
+            "Content-Type": "application/json"
+          }
+        }) : void 0;
+        this.client = createdClient ?? import_axios.default;
+      }
+      static getInstance() {
+        if (!_RapidApiClient.instance) {
+          _RapidApiClient.instance = new _RapidApiClient();
+        }
+        return _RapidApiClient.instance;
+      }
+      async get(url, config2) {
+        let lastError = null;
+        const fullUrl = url.startsWith("http") ? url : `${this.baseUrl}${url}`;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            const response = await this.client.get(fullUrl, config2);
+            return response.data;
+          } catch (error) {
+            lastError = error;
+            const status = error?.response?.status;
+            const code = this.toErrorCode(status, error?.code, error?.message);
+            if (attempt === 2 || !["429", "500", "TIMEOUT", "NETWORK"].includes(code)) {
+              console.warn(`[RapidApiClient] ${code} for ${url}`, error?.message || error);
+              throw new Error(code);
+            }
+            const backoff = 250 * (attempt + 1);
+            await new Promise((resolve) => setTimeout(resolve, backoff));
+          }
+        }
+        throw lastError ?? new Error("NETWORK");
+      }
+      toErrorCode(status, code, message) {
+        if (code === "ECONNABORTED" || /timeout/i.test(message || "")) return "TIMEOUT";
+        if (!status) return "NETWORK";
+        if (status === 400) return "400";
+        if (status === 401) return "401";
+        if (status === 403) return "403";
+        if (status === 404) return "404";
+        if (status === 429) return "429";
+        if (status >= 500) return "500";
+        return "NETWORK";
+      }
+    };
+  }
+});
+
+// src/providers/symbolMapper.ts
+var SUPPORTED_SYMBOLS, SymbolMapper;
+var init_symbolMapper = __esm({
+  "src/providers/symbolMapper.ts"() {
+    "use strict";
+    SUPPORTED_SYMBOLS = {
+      EURUSD: { providerSymbol: "EURUSD=X", category: "FOREX", displaySymbol: "EUR/USD" },
+      GBPUSD: { providerSymbol: "GBPUSD=X", category: "FOREX", displaySymbol: "GBP/USD" },
+      USDJPY: { providerSymbol: "USDJPY=X", category: "FOREX", displaySymbol: "USD/JPY" },
+      AUDUSD: { providerSymbol: "AUDUSD=X", category: "FOREX", displaySymbol: "AUD/USD" },
+      USDCAD: { providerSymbol: "USDCAD=X", category: "FOREX", displaySymbol: "USD/CAD" },
+      USDCHF: { providerSymbol: "USDCHF=X", category: "FOREX", displaySymbol: "USD/CHF" },
+      NZDUSD: { providerSymbol: "NZDUSD=X", category: "FOREX", displaySymbol: "NZD/USD" },
+      EURJPY: { providerSymbol: "EURJPY=X", category: "FOREX", displaySymbol: "EUR/JPY" },
+      EURGBP: { providerSymbol: "EURGBP=X", category: "FOREX", displaySymbol: "EUR/GBP" },
+      GBPJPY: { providerSymbol: "GBPJPY=X", category: "FOREX", displaySymbol: "GBP/JPY" },
+      XAUUSD: { providerSymbol: "GC=F", category: "METALS", displaySymbol: "XAU/USD" },
+      XAGUSD: { providerSymbol: "SI=F", category: "METALS", displaySymbol: "XAG/USD" },
+      BTCUSD: { providerSymbol: "BTC-USD", category: "CRYPTO", displaySymbol: "BTC/USD" },
+      ETHUSD: { providerSymbol: "ETH-USD", category: "CRYPTO", displaySymbol: "ETH/USD" },
+      SPX500: { providerSymbol: "^GSPC", category: "INDICES", displaySymbol: "SPX 500" },
+      NAS100: { providerSymbol: "^NDX", category: "INDICES", displaySymbol: "NAS 100" },
+      GER40: { providerSymbol: "^GDAXI", category: "INDICES", displaySymbol: "GER 40" }
+    };
+    SymbolMapper = class {
+      static normalizeSymbol(symbol) {
+        return (symbol || "").replace(/[/\-\s]+/g, "").toUpperCase();
+      }
+      static getProviderSymbol(symbol) {
+        const normalized = this.normalizeSymbol(symbol);
+        const definition = SUPPORTED_SYMBOLS[normalized];
+        if (!definition) {
+          throw new Error(`Unsupported market symbol: ${symbol}`);
+        }
+        return definition.providerSymbol;
+      }
+      static getDisplaySymbol(symbol) {
+        const normalized = this.normalizeSymbol(symbol);
+        return SUPPORTED_SYMBOLS[normalized]?.displaySymbol || normalized;
+      }
+      static getCategory(symbol) {
+        const normalized = this.normalizeSymbol(symbol);
+        return SUPPORTED_SYMBOLS[normalized]?.category || "UNKNOWN";
+      }
+      static getAllSymbols() {
+        return Object.keys(SUPPORTED_SYMBOLS);
+      }
+    };
+  }
+});
+
+// src/providers/marketProvider.ts
+var MarketProvider;
+var init_marketProvider = __esm({
+  "src/providers/marketProvider.ts"() {
+    "use strict";
+    init_rapidApiClient();
+    init_symbolMapper();
+    MarketProvider = class {
+      static client = RapidApiClient.getInstance();
+      static normalizeSymbol(symbol) {
+        return SymbolMapper.normalizeSymbol(symbol);
+      }
+      static isValidCandle(candle) {
+        const time = Number(candle?.time);
+        const open = Number(candle?.open);
+        const high = Number(candle?.high);
+        const low = Number(candle?.low);
+        const close = Number(candle?.close);
+        if (!Number.isFinite(time) || time <= 0) return false;
+        if ([open, high, low, close].some((value) => !Number.isFinite(value) || value === null || value === void 0)) return false;
+        if (high < low || high < open || high < close || low > open || low > close) return false;
+        return true;
+      }
+      static mapTimeframe(timeframe) {
+        switch (timeframe) {
+          case "M1":
+            return { interval: "1m", range: "7d" };
+          case "M5":
+            return { interval: "5m", range: "1mo" };
+          case "M15":
+            return { interval: "15m", range: "1mo" };
+          case "M30":
+            return { interval: "30m", range: "1mo" };
+          case "H1":
+            return { interval: "60m", range: "3mo" };
+          case "H4":
+            return { interval: "240m", range: "6mo" };
+          case "D1":
+          default:
+            return { interval: "1d", range: "1y" };
+        }
+      }
+      static async fetchQuote(symbol) {
+        const normalized = this.normalizeSymbol(symbol);
+        const rapidApiSymbol = SymbolMapper.getProviderSymbol(normalized);
+        const data = await this.client.get(`/v8/finance/chart/${encodeURIComponent(rapidApiSymbol)}`, {
+          params: { interval: "1m", range: "1d" }
+        });
+        const chartResult = data?.chart?.result?.[0];
+        const meta = chartResult?.meta;
+        const quote = chartResult?.indicators?.quote?.[0];
+        const price = Number(meta?.regularMarketPrice ?? quote?.close?.slice(-1)?.[0]);
+        if (!Number.isFinite(price) || price <= 0) {
+          throw new Error("Invalid RapidAPI quote response");
+        }
+        const previousClose = Number(meta?.chartPreviousClose ?? price);
+        const bid = Number(meta?.regularMarketBid ?? price);
+        const ask = Number(meta?.regularMarketAsk ?? price);
+        const spread = Math.max(ask - bid, 0);
+        const high = Number(meta?.regularMarketDayHigh ?? quote?.high?.slice(-1)?.[0] ?? price);
+        const low = Number(meta?.regularMarketDayLow ?? quote?.low?.slice(-1)?.[0] ?? price);
+        const open = Number(meta?.regularMarketOpen ?? quote?.open?.slice(-1)?.[0] ?? price);
+        const volume = Number(quote?.volume?.slice(-1)?.[0] ?? 0);
+        const parsedObject = {
+          symbol: normalized,
+          price,
+          bid,
+          ask,
+          spread,
+          high,
+          low,
+          open,
+          previousClose,
+          change: price - previousClose,
+          changePercent: previousClose ? (price - previousClose) / previousClose * 100 : 0,
+          category: SymbolMapper.getCategory(normalized),
+          marketStatus: meta?.exchangeTimezoneName ? "OPEN" : "UNKNOWN",
+          volume: Number.isFinite(volume) ? volume : 0,
+          timestamp: Date.now()
+        };
+        if (normalized === "XAUUSD" || normalized === "XAGUSD") {
+          console.log(`
+====================================================`);
+          console.log(`--- RAW JSON FROM YAHOO FINANCE (${rapidApiSymbol}) ---`);
+          console.log(JSON.stringify(meta, null, 2));
+          console.log(`
+--- PARSED OBJECT (${normalized}) ---`);
+          console.log(JSON.stringify(parsedObject, null, 2));
+          console.log(`====================================================
+`);
+        }
+        return parsedObject;
+      }
+      static async fetchHistoricalCandles(symbol, timeframe = "D1") {
+        const normalized = this.normalizeSymbol(symbol);
+        const rapidApiSymbol = SymbolMapper.getProviderSymbol(normalized);
+        const { interval, range } = this.mapTimeframe(timeframe);
+        const data = await this.client.get(`/v8/finance/chart/${encodeURIComponent(rapidApiSymbol)}`, {
+          params: { interval, range }
+        });
+        const chartResult = data?.chart?.result?.[0];
+        const quote = chartResult?.indicators?.quote?.[0];
+        if (!Array.isArray(chartResult?.timestamp) || !quote) {
+          throw new Error("Invalid RapidAPI candle response");
+        }
+        const candles = chartResult.timestamp.map((time, index) => ({
+          time,
+          open: Number(quote.open?.[index]),
+          high: Number(quote.high?.[index]),
+          low: Number(quote.low?.[index]),
+          close: Number(quote.close?.[index]),
+          volume: Number(quote.volume?.[index] ?? 0)
+        })).filter((candle) => this.isValidCandle(candle)).sort((a, b) => a.time - b.time);
+        if (candles.length === 0) {
+          throw new Error("Received empty or invalid candles");
+        }
+        return candles;
+      }
+      static getCategory(symbol) {
+        return SymbolMapper.getCategory(symbol);
+      }
+      static getAllSymbols() {
+        return SymbolMapper.getAllSymbols();
+      }
+    };
+  }
+});
+
+// src/services/market.service.ts
+var market_service_exports = {};
+__export(market_service_exports, {
+  MarketService: () => MarketService
+});
+var MarketService;
+var init_market_service = __esm({
+  "src/services/market.service.ts"() {
+    "use strict";
+    init_marketProvider();
+    init_symbolMapper();
+    MarketService = class {
+      static WATCHLIST = [
+        "EURUSD",
+        "GBPUSD",
+        "USDJPY",
+        "AUDUSD",
+        "USDCAD",
+        "USDCHF",
+        "NZDUSD",
+        "EURJPY",
+        "EURGBP",
+        "GBPJPY",
+        "XAUUSD",
+        "XAGUSD",
+        "BTCUSD",
+        "ETHUSD"
+      ];
+      static PRICE_TTL_MS = 250;
+      static CANDLE_TTL_MS = 6e4;
+      static priceCache = /* @__PURE__ */ new Map();
+      static candleCache = /* @__PURE__ */ new Map();
+      static quotePromises = /* @__PURE__ */ new Map();
+      static candlePromises = /* @__PURE__ */ new Map();
+      static normalizeSymbol(symbol) {
+        return SymbolMapper.normalizeSymbol(symbol);
+      }
+      static getWatchSymbols() {
+        return [...this.WATCHLIST];
+      }
+      static async getWatchQuotes() {
+        return Object.values(await this.getQuotes(this.WATCHLIST));
+      }
+      static async getQuote(symbol) {
+        const normalized = this.normalizeSymbol(symbol);
+        if (!normalized) {
+          return null;
+        }
+        const cacheKey = `quote:${normalized}`;
+        const now = Date.now();
+        const cached = this.priceCache.get(cacheKey);
+        if (cached && cached.expiresAt > now) {
+          return cached.value;
+        }
+        if (this.quotePromises.has(cacheKey)) {
+          return this.quotePromises.get(cacheKey);
+        }
+        const fetchPromise = (async () => {
+          try {
+            const quote = await MarketProvider.fetchQuote(normalized);
+            this.priceCache.set(cacheKey, { value: quote, expiresAt: Date.now() + this.PRICE_TTL_MS });
+            return quote;
+          } catch (error) {
+            console.error(`[MarketService] Quote fetch failed for ${normalized}: ${error.message}`);
+            if (cached?.value) {
+              console.warn(`[MarketService] Serving stale quote cache for ${normalized}`);
+              return cached.value;
+            }
+            return null;
+          } finally {
+            this.quotePromises.delete(cacheKey);
+          }
+        })();
+        this.quotePromises.set(cacheKey, fetchPromise);
+        return fetchPromise;
+      }
+      static getPrice(symbol) {
+        const normalized = this.normalizeSymbol(symbol);
+        if (!normalized) return null;
+        return this.priceCache.get(`quote:${normalized}`)?.value?.price || null;
+      }
+      static async getQuotes(symbols) {
+        const results = {};
+        const uniqueSymbols = [...new Set(symbols.map((symbol) => this.normalizeSymbol(symbol)).filter(Boolean))];
+        await Promise.all(
+          uniqueSymbols.map(async (symbol) => {
+            const quote = await this.getQuote(symbol);
+            if (quote) {
+              results[quote.symbol] = quote;
+            }
+          })
+        );
+        return results;
+      }
+      static async getHistoricalCandles(symbol, interval = "D1") {
+        const normalized = this.normalizeSymbol(symbol);
+        if (!normalized) {
+          return [];
+        }
+        const cacheKey = `candles:${normalized}:${interval}`;
+        const now = Date.now();
+        const cached = this.candleCache.get(cacheKey);
+        if (cached && cached.expiresAt > now) {
+          return cached.value;
+        }
+        if (this.candlePromises.has(cacheKey)) {
+          return this.candlePromises.get(cacheKey);
+        }
+        const fetchPromise = (async () => {
+          try {
+            const candles = await MarketProvider.fetchHistoricalCandles(normalized, interval);
+            this.candleCache.set(cacheKey, { value: candles, expiresAt: Date.now() + this.CANDLE_TTL_MS });
+            return candles;
+          } catch (error) {
+            console.error(`[MarketService] Historical candles fetch failed for ${normalized} (${interval}): ${error.message}`);
+            if (cached?.value && cached.value.length > 0) {
+              console.warn(`[MarketService] Serving stale candle cache for ${normalized} (${interval})`);
+              return cached.value;
+            }
+            return [];
+          } finally {
+            this.candlePromises.delete(cacheKey);
+          }
+        })();
+        this.candlePromises.set(cacheKey, fetchPromise);
+        return fetchPromise;
+      }
+      static async getSymbolsByCategory(category) {
+        const allSymbols = MarketProvider.getAllSymbols();
+        const symbols = allSymbols.filter((sym) => MarketProvider.getCategory(sym) === category);
+        return Object.values(await this.getQuotes(symbols));
+      }
+      static async searchSymbols(query) {
+        const queryUpper = query.toUpperCase();
+        const allSymbols = MarketProvider.getAllSymbols();
+        const symbols = allSymbols.filter((sym) => sym.includes(queryUpper));
+        return Object.values(await this.getQuotes(symbols));
+      }
+    };
+  }
+});
+
+// src/models/Position.ts
+var Position_exports = {};
+__export(Position_exports, {
+  PositionModel: () => PositionModel
+});
+var import_mongoose6, PositionSchema, PositionModel;
+var init_Position = __esm({
+  "src/models/Position.ts"() {
+    "use strict";
+    import_mongoose6 = __toESM(require("mongoose"), 1);
+    PositionSchema = new import_mongoose6.Schema(
+      {
+        userId: { type: import_mongoose6.Schema.Types.ObjectId, ref: "User", required: true },
+        symbol: { type: String, required: true },
+        type: { type: String, enum: ["BUY", "SELL"], required: true },
+        volume: { type: Number, required: true },
+        openPrice: { type: Number, required: true },
+        currentPrice: { type: Number, required: true },
+        sl: { type: Number },
+        tp: { type: Number },
+        pnl: { type: Number, default: 0 },
+        commission: { type: Number, default: 0 },
+        swap: { type: Number, default: 0 },
+        marginUsed: { type: Number, default: 0 },
+        status: { type: String, enum: ["OPEN", "CLOSED"], default: "OPEN" },
+        closePrice: { type: Number }
+      },
+      { timestamps: true }
+    );
+    PositionModel = import_mongoose6.default.model("Position", PositionSchema);
+  }
+});
+
+// src/models/Symbol.ts
+var Symbol_exports = {};
+__export(Symbol_exports, {
+  SymbolModel: () => SymbolModel
+});
+var import_mongoose8, SymbolSchema, SymbolModel;
+var init_Symbol = __esm({
+  "src/models/Symbol.ts"() {
+    "use strict";
+    import_mongoose8 = __toESM(require("mongoose"), 1);
+    SymbolSchema = new import_mongoose8.Schema(
+      {
+        symbol: { type: String, required: true, unique: true, uppercase: true, trim: true },
+        name: { type: String, required: true },
+        category: { type: String, required: true, default: "FOREX" },
+        price: { type: Number, required: true, default: 0 },
+        leverageLimit: { type: Number, required: true, default: 100 },
+        spread: { type: Number, required: true, default: 1 },
+        contractSize: { type: Number, required: true, default: 1e5 },
+        digits: { type: Number, required: true, default: 5 },
+        minLot: { type: Number, required: true, default: 0.01 },
+        maxLot: { type: Number, required: true, default: 100 },
+        lotStep: { type: Number, required: true, default: 0.01 },
+        isActive: { type: Boolean, default: true }
+      },
+      { timestamps: true }
+    );
+    SymbolModel = import_mongoose8.default.model("Symbol", SymbolSchema);
+  }
+});
+
+// src/services/tradeUtils.ts
+var tradeUtils_exports = {};
+__export(tradeUtils_exports, {
+  TradeUtils: () => TradeUtils
+});
+var TradeUtils;
+var init_tradeUtils = __esm({
+  "src/services/tradeUtils.ts"() {
+    "use strict";
+    TradeUtils = class {
+      static getContractSize(symbol) {
+        const sym = symbol.toUpperCase();
+        if (sym.startsWith("XAU")) return 100;
+        if (sym.startsWith("XAG")) return 5e3;
+        if (["BTCUSD", "ETHUSD"].includes(sym)) return 1;
+        if (["US30", "NAS100", "SPX500"].includes(sym)) return 10;
+        return 1e5;
+      }
+      static calculatePnl(type, openPrice, currentBid, currentAsk, volume, symbol, allPrices = {}, contractSizeOverride) {
+        const contractSize = contractSizeOverride || this.getContractSize(symbol);
+        const sym = symbol.toUpperCase();
+        let rawPnl = 0;
+        if (type === "BUY") {
+          rawPnl = (currentBid - openPrice) * volume * contractSize;
+        } else {
+          rawPnl = (openPrice - currentAsk) * volume * contractSize;
+        }
+        if (sym.endsWith("USD")) {
+          return rawPnl;
+        } else if (sym.startsWith("USD")) {
+          const currentPrice = (currentBid + currentAsk) / 2;
+          return rawPnl / currentPrice;
+        } else {
+          const quoteCurrency = sym.substring(3);
+          const currentPrice = (currentBid + currentAsk) / 2;
+          if (quoteCurrency === "JPY") {
+            const crossPair = `USDJPY`;
+            const crossPrice = allPrices[crossPair]?.price || currentPrice;
+            if (crossPair === "USDJPY" && allPrices[crossPair]) {
+              return rawPnl / allPrices[crossPair].price;
+            }
+          }
+          if (quoteCurrency === "GBP") {
+            const crossPair = `GBPUSD`;
+            if (allPrices[crossPair]) {
+              return rawPnl * allPrices[crossPair].price;
+            }
+          }
+          return rawPnl;
+        }
+      }
+    };
+  }
+});
+
 // server.ts
 var import_dotenv3 = __toESM(require("dotenv"), 1);
 var import_express19 = __toESM(require("express"), 1);
@@ -118,11 +631,15 @@ var connectDatabase = async () => {
       const { MongoMemoryServer } = await import("mongodb-memory-server");
       mongoServer = await MongoMemoryServer.create();
       const uri = mongoServer.getUri();
-      await import_mongoose.default.connect(uri);
+      await import_mongoose.default.connect(uri, {
+        serverSelectionTimeoutMS: 5e3,
+        socketTimeoutMS: 45e3
+      });
       console.log("MongoDB Connected Successfully (in-memory)");
     } else {
       await import_mongoose.default.connect(config.mongoUri, {
-        // useNewUrlParser and useUnifiedTopology are default in Mongoose 6+
+        serverSelectionTimeoutMS: 5e3,
+        socketTimeoutMS: 45e3
       });
       console.log("MongoDB Connected Successfully");
     }
@@ -455,370 +972,9 @@ var SocketServer = class {
   }
 };
 
-// src/providers/rapidApiClient.ts
-var import_axios = __toESM(require("axios"), 1);
-var import_dotenv2 = __toESM(require("dotenv"), 1);
-import_dotenv2.default.config({ path: "./.env" });
-var RapidApiClient = class _RapidApiClient {
-  static instance;
-  client;
-  baseUrl;
-  constructor() {
-    const apiKey = process.env.RAPID_API_KEY || process.env.RAPIDAPI_KEY;
-    const apiHost = process.env.RAPID_API_HOST || "query1.finance.yahoo.com";
-    this.baseUrl = `https://${apiHost}`;
-    if (!apiKey) {
-      throw new Error("RapidAPI Key is not configured in .env");
-    }
-    const factory = import_axios.default.create;
-    const createdClient = factory ? factory({
-      baseURL: this.baseUrl,
-      timeout: 1e4,
-      headers: {
-        "x-rapidapi-host": apiHost,
-        "x-rapidapi-key": apiKey,
-        "Content-Type": "application/json"
-      }
-    }) : void 0;
-    this.client = createdClient ?? import_axios.default;
-  }
-  static getInstance() {
-    if (!_RapidApiClient.instance) {
-      _RapidApiClient.instance = new _RapidApiClient();
-    }
-    return _RapidApiClient.instance;
-  }
-  async get(url, config2) {
-    let lastError = null;
-    const fullUrl = url.startsWith("http") ? url : `${this.baseUrl}${url}`;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        const response = await this.client.get(fullUrl, config2);
-        return response.data;
-      } catch (error) {
-        lastError = error;
-        const status = error?.response?.status;
-        const code = this.toErrorCode(status, error?.code, error?.message);
-        if (attempt === 2 || !["429", "500", "TIMEOUT", "NETWORK"].includes(code)) {
-          console.warn(`[RapidApiClient] ${code} for ${url}`, error?.message || error);
-          throw new Error(code);
-        }
-        const backoff = 250 * (attempt + 1);
-        await new Promise((resolve) => setTimeout(resolve, backoff));
-      }
-    }
-    throw lastError ?? new Error("NETWORK");
-  }
-  toErrorCode(status, code, message) {
-    if (code === "ECONNABORTED" || /timeout/i.test(message || "")) return "TIMEOUT";
-    if (!status) return "NETWORK";
-    if (status === 400) return "400";
-    if (status === 401) return "401";
-    if (status === 403) return "403";
-    if (status === 404) return "404";
-    if (status === 429) return "429";
-    if (status >= 500) return "500";
-    return "NETWORK";
-  }
-};
-
-// src/providers/symbolMapper.ts
-var SUPPORTED_SYMBOLS = {
-  EURUSD: { providerSymbol: "EURUSD=X", category: "FOREX", displaySymbol: "EUR/USD" },
-  GBPUSD: { providerSymbol: "GBPUSD=X", category: "FOREX", displaySymbol: "GBP/USD" },
-  USDJPY: { providerSymbol: "USDJPY=X", category: "FOREX", displaySymbol: "USD/JPY" },
-  AUDUSD: { providerSymbol: "AUDUSD=X", category: "FOREX", displaySymbol: "AUD/USD" },
-  USDCAD: { providerSymbol: "USDCAD=X", category: "FOREX", displaySymbol: "USD/CAD" },
-  USDCHF: { providerSymbol: "USDCHF=X", category: "FOREX", displaySymbol: "USD/CHF" },
-  NZDUSD: { providerSymbol: "NZDUSD=X", category: "FOREX", displaySymbol: "NZD/USD" },
-  EURJPY: { providerSymbol: "EURJPY=X", category: "FOREX", displaySymbol: "EUR/JPY" },
-  EURGBP: { providerSymbol: "EURGBP=X", category: "FOREX", displaySymbol: "EUR/GBP" },
-  GBPJPY: { providerSymbol: "GBPJPY=X", category: "FOREX", displaySymbol: "GBP/JPY" },
-  XAUUSD: { providerSymbol: "GC=F", category: "METALS", displaySymbol: "XAU/USD" },
-  XAGUSD: { providerSymbol: "SI=F", category: "METALS", displaySymbol: "XAG/USD" },
-  BTCUSD: { providerSymbol: "BTC-USD", category: "CRYPTO", displaySymbol: "BTC/USD" },
-  ETHUSD: { providerSymbol: "ETH-USD", category: "CRYPTO", displaySymbol: "ETH/USD" },
-  SPX500: { providerSymbol: "^GSPC", category: "INDICES", displaySymbol: "SPX 500" },
-  NAS100: { providerSymbol: "^NDX", category: "INDICES", displaySymbol: "NAS 100" },
-  GER40: { providerSymbol: "^GDAXI", category: "INDICES", displaySymbol: "GER 40" }
-};
-var SymbolMapper = class {
-  static normalizeSymbol(symbol) {
-    return (symbol || "").replace(/[/\-\s]+/g, "").toUpperCase();
-  }
-  static getProviderSymbol(symbol) {
-    const normalized = this.normalizeSymbol(symbol);
-    const definition = SUPPORTED_SYMBOLS[normalized];
-    if (!definition) {
-      throw new Error(`Unsupported market symbol: ${symbol}`);
-    }
-    return definition.providerSymbol;
-  }
-  static getDisplaySymbol(symbol) {
-    const normalized = this.normalizeSymbol(symbol);
-    return SUPPORTED_SYMBOLS[normalized]?.displaySymbol || normalized;
-  }
-  static getCategory(symbol) {
-    const normalized = this.normalizeSymbol(symbol);
-    return SUPPORTED_SYMBOLS[normalized]?.category || "UNKNOWN";
-  }
-  static getAllSymbols() {
-    return Object.keys(SUPPORTED_SYMBOLS);
-  }
-};
-
-// src/providers/marketProvider.ts
-var MarketProvider = class {
-  static client = RapidApiClient.getInstance();
-  static normalizeSymbol(symbol) {
-    return SymbolMapper.normalizeSymbol(symbol);
-  }
-  static isValidCandle(candle) {
-    const time = Number(candle?.time);
-    const open = Number(candle?.open);
-    const high = Number(candle?.high);
-    const low = Number(candle?.low);
-    const close = Number(candle?.close);
-    if (!Number.isFinite(time) || time <= 0) return false;
-    if ([open, high, low, close].some((value) => !Number.isFinite(value) || value === null || value === void 0)) return false;
-    if (high < low || high < open || high < close || low > open || low > close) return false;
-    return true;
-  }
-  static mapTimeframe(timeframe) {
-    switch (timeframe) {
-      case "M1":
-        return { interval: "1m", range: "7d" };
-      case "M5":
-        return { interval: "5m", range: "1mo" };
-      case "M15":
-        return { interval: "15m", range: "1mo" };
-      case "M30":
-        return { interval: "30m", range: "1mo" };
-      case "H1":
-        return { interval: "60m", range: "3mo" };
-      case "H4":
-        return { interval: "240m", range: "6mo" };
-      case "D1":
-      default:
-        return { interval: "1d", range: "1y" };
-    }
-  }
-  static async fetchQuote(symbol) {
-    const normalized = this.normalizeSymbol(symbol);
-    const rapidApiSymbol = SymbolMapper.getProviderSymbol(normalized);
-    const data = await this.client.get(`/v8/finance/chart/${encodeURIComponent(rapidApiSymbol)}`, {
-      params: { interval: "1m", range: "1d" }
-    });
-    const chartResult = data?.chart?.result?.[0];
-    const meta = chartResult?.meta;
-    const quote = chartResult?.indicators?.quote?.[0];
-    const price = Number(meta?.regularMarketPrice ?? quote?.close?.slice(-1)?.[0]);
-    if (!Number.isFinite(price) || price <= 0) {
-      throw new Error("Invalid RapidAPI quote response");
-    }
-    const previousClose = Number(meta?.chartPreviousClose ?? price);
-    const bid = Number(meta?.regularMarketBid ?? price);
-    const ask = Number(meta?.regularMarketAsk ?? price);
-    const spread = Math.max(ask - bid, 0);
-    const high = Number(meta?.regularMarketDayHigh ?? quote?.high?.slice(-1)?.[0] ?? price);
-    const low = Number(meta?.regularMarketDayLow ?? quote?.low?.slice(-1)?.[0] ?? price);
-    const open = Number(meta?.regularMarketOpen ?? quote?.open?.slice(-1)?.[0] ?? price);
-    const volume = Number(quote?.volume?.slice(-1)?.[0] ?? 0);
-    return {
-      symbol: normalized,
-      price,
-      bid,
-      ask,
-      spread,
-      high,
-      low,
-      open,
-      previousClose,
-      change: price - previousClose,
-      changePercent: previousClose ? (price - previousClose) / previousClose * 100 : 0,
-      category: SymbolMapper.getCategory(normalized),
-      marketStatus: meta?.exchangeTimezoneName ? "OPEN" : "UNKNOWN",
-      volume: Number.isFinite(volume) ? volume : 0,
-      timestamp: Date.now()
-    };
-  }
-  static async fetchHistoricalCandles(symbol, timeframe = "D1") {
-    const normalized = this.normalizeSymbol(symbol);
-    const rapidApiSymbol = SymbolMapper.getProviderSymbol(normalized);
-    const { interval, range } = this.mapTimeframe(timeframe);
-    const data = await this.client.get(`/v8/finance/chart/${encodeURIComponent(rapidApiSymbol)}`, {
-      params: { interval, range }
-    });
-    const chartResult = data?.chart?.result?.[0];
-    const quote = chartResult?.indicators?.quote?.[0];
-    if (!Array.isArray(chartResult?.timestamp) || !quote) {
-      throw new Error("Invalid RapidAPI candle response");
-    }
-    const candles = chartResult.timestamp.map((time, index) => ({
-      time,
-      open: Number(quote.open?.[index]),
-      high: Number(quote.high?.[index]),
-      low: Number(quote.low?.[index]),
-      close: Number(quote.close?.[index]),
-      volume: Number(quote.volume?.[index] ?? 0)
-    })).filter((candle) => this.isValidCandle(candle)).sort((a, b) => a.time - b.time);
-    if (candles.length === 0) {
-      throw new Error("Received empty or invalid candles");
-    }
-    return candles;
-  }
-  static getCategory(symbol) {
-    return SymbolMapper.getCategory(symbol);
-  }
-  static getAllSymbols() {
-    return SymbolMapper.getAllSymbols();
-  }
-};
-
-// src/services/market.service.ts
-var MarketService = class {
-  static WATCHLIST = [
-    "EURUSD",
-    "GBPUSD",
-    "USDJPY",
-    "AUDUSD",
-    "USDCAD",
-    "USDCHF",
-    "NZDUSD",
-    "EURJPY",
-    "EURGBP",
-    "GBPJPY",
-    "XAUUSD",
-    "XAGUSD",
-    "BTCUSD",
-    "ETHUSD"
-  ];
-  static PRICE_TTL_MS = 250;
-  static CANDLE_TTL_MS = 6e4;
-  static priceCache = /* @__PURE__ */ new Map();
-  static candleCache = /* @__PURE__ */ new Map();
-  static quotePromises = /* @__PURE__ */ new Map();
-  static candlePromises = /* @__PURE__ */ new Map();
-  static normalizeSymbol(symbol) {
-    return SymbolMapper.normalizeSymbol(symbol);
-  }
-  static getWatchSymbols() {
-    return [...this.WATCHLIST];
-  }
-  static async getWatchQuotes() {
-    return Object.values(await this.getQuotes(this.WATCHLIST));
-  }
-  static async getQuote(symbol) {
-    const normalized = this.normalizeSymbol(symbol);
-    if (!normalized) {
-      return null;
-    }
-    const cacheKey = `quote:${normalized}`;
-    const now = Date.now();
-    const cached = this.priceCache.get(cacheKey);
-    if (cached && cached.expiresAt > now) {
-      return cached.value;
-    }
-    if (this.quotePromises.has(cacheKey)) {
-      return this.quotePromises.get(cacheKey);
-    }
-    const fetchPromise = (async () => {
-      try {
-        const quote = await MarketProvider.fetchQuote(normalized);
-        this.priceCache.set(cacheKey, { value: quote, expiresAt: Date.now() + this.PRICE_TTL_MS });
-        return quote;
-      } catch (error) {
-        console.error(`[MarketService] Quote fetch failed for ${normalized}: ${error.message}`);
-        if (cached?.value) {
-          console.warn(`[MarketService] Serving stale quote cache for ${normalized}`);
-          return cached.value;
-        }
-        return null;
-      } finally {
-        this.quotePromises.delete(cacheKey);
-      }
-    })();
-    this.quotePromises.set(cacheKey, fetchPromise);
-    return fetchPromise;
-  }
-  static async getQuotes(symbols) {
-    const results = {};
-    const uniqueSymbols = [...new Set(symbols.map((symbol) => this.normalizeSymbol(symbol)).filter(Boolean))];
-    await Promise.all(
-      uniqueSymbols.map(async (symbol) => {
-        const quote = await this.getQuote(symbol);
-        if (quote) {
-          results[quote.symbol] = quote;
-        }
-      })
-    );
-    return results;
-  }
-  static async getHistoricalCandles(symbol, interval = "D1") {
-    const normalized = this.normalizeSymbol(symbol);
-    if (!normalized) {
-      return [];
-    }
-    const cacheKey = `candles:${normalized}:${interval}`;
-    const now = Date.now();
-    const cached = this.candleCache.get(cacheKey);
-    if (cached && cached.expiresAt > now) {
-      return cached.value;
-    }
-    if (this.candlePromises.has(cacheKey)) {
-      return this.candlePromises.get(cacheKey);
-    }
-    const fetchPromise = (async () => {
-      try {
-        const candles = await MarketProvider.fetchHistoricalCandles(normalized, interval);
-        this.candleCache.set(cacheKey, { value: candles, expiresAt: Date.now() + this.CANDLE_TTL_MS });
-        return candles;
-      } catch (error) {
-        console.error(`[MarketService] Historical candles fetch failed for ${normalized} (${interval}): ${error.message}`);
-        if (cached?.value && cached.value.length > 0) {
-          console.warn(`[MarketService] Serving stale candle cache for ${normalized} (${interval})`);
-          return cached.value;
-        }
-        return [];
-      } finally {
-        this.candlePromises.delete(cacheKey);
-      }
-    })();
-    this.candlePromises.set(cacheKey, fetchPromise);
-    return fetchPromise;
-  }
-  static async getSymbolsByCategory(category) {
-    const allSymbols = MarketProvider.getAllSymbols();
-    const symbols = allSymbols.filter((sym) => MarketProvider.getCategory(sym) === category);
-    return Object.values(await this.getQuotes(symbols));
-  }
-  static async searchSymbols(query) {
-    const queryUpper = query.toUpperCase();
-    const allSymbols = MarketProvider.getAllSymbols();
-    const symbols = allSymbols.filter((sym) => sym.includes(queryUpper));
-    return Object.values(await this.getQuotes(symbols));
-  }
-};
-
-// src/models/Position.ts
-var import_mongoose6 = __toESM(require("mongoose"), 1);
-var PositionSchema = new import_mongoose6.Schema(
-  {
-    userId: { type: import_mongoose6.Schema.Types.ObjectId, ref: "User", required: true },
-    symbol: { type: String, required: true },
-    type: { type: String, enum: ["BUY", "SELL"], required: true },
-    volume: { type: Number, required: true },
-    openPrice: { type: Number, required: true },
-    currentPrice: { type: Number, required: true },
-    sl: { type: Number },
-    tp: { type: Number },
-    pnl: { type: Number, default: 0 },
-    status: { type: String, enum: ["OPEN", "CLOSED"], default: "OPEN" },
-    closePrice: { type: Number }
-  },
-  { timestamps: true }
-);
-var PositionModel = import_mongoose6.default.model("Position", PositionSchema);
+// src/services/priceEngine.ts
+init_market_service();
+init_Position();
 
 // src/models/Order.ts
 var import_mongoose7 = __toESM(require("mongoose"), 1);
@@ -841,124 +997,430 @@ var OrderModel = import_mongoose7.default.model("Order", OrderSchema);
 // src/services/marginEngine.ts
 init_Wallet();
 
-// src/models/Symbol.ts
-var import_mongoose8 = __toESM(require("mongoose"), 1);
-var SymbolSchema = new import_mongoose8.Schema(
-  {
-    symbol: { type: String, required: true, unique: true, uppercase: true, trim: true },
-    name: { type: String, required: true },
-    category: { type: String, required: true, default: "FOREX" },
-    price: { type: Number, required: true, default: 0 },
-    leverageLimit: { type: Number, required: true, default: 100 },
-    spread: { type: Number, required: true, default: 1 },
-    isActive: { type: Boolean, default: true }
-  },
-  { timestamps: true }
-);
-var SymbolModel = import_mongoose8.default.model("Symbol", SymbolSchema);
-
-// src/services/tradeUtils.ts
-var TradeUtils = class {
-  static getContractSize(symbol) {
-    const sym = symbol.toUpperCase();
-    if (sym.startsWith("XAU")) return 100;
-    if (sym.startsWith("XAG")) return 5e3;
-    if (["BTCUSD", "ETHUSD"].includes(sym)) return 1;
-    if (["US30", "NAS100", "SPX500"].includes(sym)) return 10;
-    return 1e5;
+// src/engine/SymbolSpecification.ts
+init_Symbol();
+var SymbolSpecification = class {
+  static cache = /* @__PURE__ */ new Map();
+  /**
+   * Initializes or refreshes the symbol specifications from the database
+   */
+  static async loadAll() {
+    try {
+      const symbols = await SymbolModel.find({});
+      this.cache.clear();
+      for (const sym of symbols) {
+        this.cache.set(sym.symbol.toUpperCase(), sym);
+      }
+    } catch (err) {
+      console.error("[SymbolSpecification] Error loading symbols:", err);
+    }
   }
-  static calculatePnl(type, openPrice, currentPrice, volume, symbol, allPrices = {}) {
-    const contractSize = this.getContractSize(symbol);
+  /**
+   * Retrieves the specification for a symbol, providing strict MT5 defaults if missing.
+   */
+  static async get(symbol) {
     const sym = symbol.toUpperCase();
-    let rawPnl = 0;
-    if (type === "BUY") {
-      rawPnl = (currentPrice - openPrice) * volume * contractSize;
-    } else {
-      rawPnl = (openPrice - currentPrice) * volume * contractSize;
+    if (this.cache.has(sym)) {
+      return this.cache.get(sym);
     }
-    if (sym.endsWith("USD")) {
-      return rawPnl;
-    } else if (sym.startsWith("USD")) {
-      return rawPnl / currentPrice;
-    } else {
-      const quoteCurrency = sym.substring(3);
-      if (quoteCurrency === "JPY") {
-        const crossPair = `USDJPY`;
-        const crossPrice = allPrices[crossPair]?.price || currentPrice;
-        if (crossPair === "USDJPY" && allPrices[crossPair]) {
-          return rawPnl / allPrices[crossPair].price;
-        }
+    try {
+      const dbSym = await SymbolModel.findOne({ symbol: sym });
+      if (dbSym) {
+        this.cache.set(sym, dbSym);
+        return dbSym;
       }
-      if (quoteCurrency === "GBP") {
-        const crossPair = `GBPUSD`;
-        if (allPrices[crossPair]) {
-          return rawPnl * allPrices[crossPair].price;
-        }
-      }
-      return rawPnl;
+    } catch (err) {
+      console.warn(`[SymbolSpecification] DB error loading ${sym}:`, err);
     }
+    console.warn(`[SymbolSpecification] Symbol ${sym} not found in DB. Using fallback defaults.`);
+    return this.getDefaults(sym);
+  }
+  /**
+   * Synchronous getter if you are 100% sure the cache is hot.
+   */
+  static getSync(symbol) {
+    const sym = symbol.toUpperCase();
+    if (this.cache.has(sym)) {
+      return this.cache.get(sym);
+    }
+    return this.getDefaults(sym);
+  }
+  static getDefaults(symbol) {
+    const sym = symbol.toUpperCase();
+    let contractSize = 1e5;
+    let digits = 5;
+    if (sym.startsWith("XAU")) {
+      contractSize = 100;
+      digits = 2;
+    } else if (sym.startsWith("XAG")) {
+      contractSize = 5e3;
+      digits = 3;
+    } else if (["BTCUSD", "ETHUSD"].includes(sym)) {
+      contractSize = 1;
+      digits = 2;
+    } else if (["US30", "NAS100", "SPX500"].includes(sym)) {
+      contractSize = 10;
+      digits = 2;
+    } else if (sym.includes("JPY")) {
+      contractSize = 1e5;
+      digits = 3;
+    }
+    return {
+      symbol: sym,
+      contractSize,
+      digits,
+      minLot: 0.01,
+      maxLot: 100,
+      lotStep: 0.01,
+      leverageLimit: 100,
+      spread: 1,
+      isActive: true
+    };
+  }
+};
+
+// src/engine/ProfitCalculator.ts
+var ProfitCalculator2 = class {
+  /**
+   * Calculates floating or realized profit strictly matching MT5 standards.
+   * 
+   * BUY:  (Bid - Entry) * ContractSize * LotSize
+   * SELL: (Entry - Ask) * ContractSize * LotSize
+   * 
+   * @param side 'BUY' | 'SELL'
+   * @param entryPrice The open price of the position
+   * @param currentBid The live Bid price
+   * @param currentAsk The live Ask price
+   * @param volume Lot size
+   * @param symbol Symbol string (e.g., 'EURUSD')
+   * @param usdRate Conversion rate to USD if the quote currency is not USD
+   */
+  static calculate(side, entryPrice, currentBid, currentAsk, volume, symbol, usdRate = 1) {
+    const spec = SymbolSpecification.getSync(symbol);
+    const contractSize = spec.contractSize || 1e5;
+    let rawProfit = 0;
+    if (side === "BUY") {
+      rawProfit = (currentBid - entryPrice) * contractSize * volume;
+    } else {
+      rawProfit = (entryPrice - currentAsk) * contractSize * volume;
+    }
+    return rawProfit * usdRate;
+  }
+};
+
+// src/engine/MarginCalculator.ts
+var MarginCalculator = class {
+  /**
+   * Calculates required margin for an open position.
+   * Formula exactly as requested: (Price * Contract Size * Volume) / Leverage
+   * 
+   * @param symbol Symbol string (e.g., 'EURUSD')
+   * @param volume Lot size
+   * @param price Current market price (Mid price or specific Bid/Ask depending on execution)
+   * @param leverage Account or Symbol leverage
+   * @param usdRate Conversion rate to USD if margin is calculated in a foreign quote currency
+   */
+  static calculate(symbol, volume, price, leverage, usdRate = 1) {
+    const spec = SymbolSpecification.getSync(symbol);
+    const contractSize = spec.contractSize || 1e5;
+    const rawMargin = price * contractSize * volume / leverage;
+    return rawMargin * usdRate;
+  }
+};
+
+// src/engine/PriceService.ts
+init_market_service();
+var PriceService = class {
+  /**
+   * Gets the current live bid, ask, and spread for a symbol.
+   * If the market service only provides a single price, it derives bid/ask using the configured spread.
+   */
+  static getRawPrice(symbol) {
+    return MarketService.getPrice(symbol);
+  }
+  static getLivePrices(symbol, spreadPips = 1, digits = 5) {
+    const rawPrice = MarketService.getPrice(symbol);
+    if (!rawPrice) {
+      return { bid: 0, ask: 0, spread: 0 };
+    }
+    const pipValue = Math.pow(10, -digits + 1);
+    const pipSize = digits === 2 || digits === 3 ? 0.01 : 1e-4;
+    const spreadValue = spreadPips * pipSize;
+    const bid = rawPrice;
+    const ask = rawPrice + spreadValue;
+    return {
+      bid: parseFloat(bid.toFixed(digits)),
+      ask: parseFloat(ask.toFixed(digits)),
+      spread: spreadPips
+    };
+  }
+  /**
+   * Retrieves the specific execution price for a new order.
+   * BUY -> ASK
+   * SELL -> BID
+   */
+  static getExecutionPrice(symbol, side, spreadPips, digits) {
+    const prices = this.getLivePrices(symbol, spreadPips, digits);
+    return side === "BUY" ? prices.ask : prices.bid;
+  }
+};
+
+// src/engine/PositionManager.ts
+var PositionManager = class {
+  /**
+   * Calculates live parameters for a position (PnL, Margin Used)
+   */
+  static evaluateLivePosition(position, allPrices = {}) {
+    const spec = SymbolSpecification.getSync(position.symbol);
+    const prices = PriceService.getLivePrices(position.symbol, spec.spread || 1, spec.digits || 5);
+    const sym = position.symbol.toUpperCase();
+    let usdRate = 1;
+    if (!sym.endsWith("USD") && !sym.startsWith("USD")) {
+      const quote = sym.substring(3);
+      if (quote === "JPY") {
+        const cross = "USDJPY";
+        let crossPrice = allPrices[cross] ? allPrices[cross].price : null;
+        if (!crossPrice) crossPrice = PriceService.getRawPrice(cross);
+        if (crossPrice > 0) usdRate = 1 / crossPrice;
+      } else if (quote === "GBP") {
+        const cross = "GBPUSD";
+        let crossPrice = allPrices[cross] ? allPrices[cross].price : null;
+        if (!crossPrice) crossPrice = PriceService.getRawPrice(cross);
+        if (crossPrice > 0) usdRate = crossPrice;
+      }
+    } else if (sym.startsWith("USD") && sym !== "USDUSD") {
+      const currentMid = (prices.bid + prices.ask) / 2;
+      usdRate = currentMid > 0 ? 1 / currentMid : 1;
+    }
+    const entryPrice = Number(position.openPrice) || 0;
+    const volume = Number(position.volume) || 0;
+    const side = position.type || "BUY";
+    const pnl = ProfitCalculator2.calculate(
+      side,
+      entryPrice,
+      prices.bid,
+      prices.ask,
+      volume,
+      position.symbol,
+      usdRate
+    );
+    const priceForMargin = side === "BUY" ? prices.bid : prices.ask;
+    const marginUsed = MarginCalculator.calculate(
+      position.symbol,
+      volume,
+      priceForMargin,
+      spec.leverageLimit || 100,
+      usdRate
+    );
+    return { pnl, marginUsed };
+  }
+  /**
+   * Calculates proportional realized PnL and remaining volume for a partial close.
+   */
+  static calculatePartialClose(position, closeVolume, livePnl) {
+    if (closeVolume >= position.volume) {
+      return { realizedPnl: livePnl, remainingVolume: 0 };
+    }
+    const proportion = closeVolume / position.volume;
+    const realizedPnl = livePnl * proportion;
+    const remainingVolume = position.volume - closeVolume;
+    return { realizedPnl, remainingVolume };
+  }
+};
+
+// src/engine/AccountCalculator.ts
+var AccountCalculator = class {
+  /**
+   * Calculates live account Equity.
+   * Equity = Balance + Floating Profit - Commission - Swap
+   */
+  static calculateEquity(balance, floatingProfit, commission = 0, swap = 0) {
+    return balance + floatingProfit - commission - swap;
+  }
+  /**
+   * Calculates Free Margin.
+   * Free Margin = Equity - Used Margin
+   */
+  static calculateFreeMargin(equity, usedMargin) {
+    return equity - usedMargin;
+  }
+  /**
+   * Calculates Margin Level percentage.
+   * Margin Level = (Equity / Used Margin) * 100
+   * 
+   * Returns Infinity if usedMargin is 0 (representing "Unlimited").
+   */
+  static calculateMarginLevel(equity, usedMargin) {
+    if (usedMargin <= 0) {
+      return Infinity;
+    }
+    return equity / usedMargin * 100;
+  }
+};
+
+// src/engine/RiskCalculator.ts
+var RiskCalculator = class {
+  /**
+   * Evaluates the margin level to determine if a stop out or margin call is triggered.
+   * Standard values are often 100% for Margin Call, 50% for Stop Out.
+   * 
+   * @param marginLevel The current Margin Level %
+   * @param stopOutLevel The threshold for Stop Out (default 50%)
+   * @param marginCallLevel The threshold for Margin Call (default 100%)
+   * @returns 'STOP_OUT' | 'MARGIN_CALL' | 'SAFE'
+   */
+  static evaluateRisk(marginLevel, stopOutLevel = 50, marginCallLevel = 100) {
+    if (marginLevel <= stopOutLevel) {
+      return "STOP_OUT";
+    }
+    if (marginLevel <= marginCallLevel) {
+      return "MARGIN_CALL";
+    }
+    return "SAFE";
+  }
+};
+
+// src/engine/OrderValidator.ts
+var OrderValidator = class {
+  /**
+   * Validates if a new order can be placed.
+   * Throws an error with a specific message if validation fails.
+   */
+  static validateNewOrder(symbol, side, volume, marginRequired, freeMargin, slPrice, tpPrice, entryPrice, marketEnabled = true) {
+    if (!marketEnabled) {
+      throw new Error("Market is Closed");
+    }
+    const spec = SymbolSpecification.getSync(symbol);
+    if (!spec || !spec.isActive) {
+      throw new Error("Disabled Symbol");
+    }
+    if (volume < spec.minLot || volume > spec.maxLot) {
+      throw new Error("Invalid Lot");
+    }
+    const lotStep = spec.lotStep || 0.01;
+    const precision = Math.max(0, -Math.floor(Math.log10(lotStep)));
+    const volumeMod = parseFloat((volume % lotStep).toFixed(precision));
+    if (volumeMod !== 0 && Math.abs(volumeMod - lotStep) > 1e-4) {
+      throw new Error("Invalid Lot");
+    }
+    if (marginRequired > freeMargin) {
+      throw new Error("Insufficient Margin");
+    }
+    if (entryPrice) {
+      if (side === "BUY") {
+        if (slPrice && slPrice >= entryPrice) throw new Error("Invalid SL");
+        if (tpPrice && tpPrice <= entryPrice) throw new Error("Invalid TP");
+      } else {
+        if (slPrice && slPrice <= entryPrice) throw new Error("Invalid SL");
+        if (tpPrice && tpPrice >= entryPrice) throw new Error("Invalid TP");
+      }
+    }
+  }
+};
+
+// src/engine/TradingEngine.ts
+var TradingEngine = class {
+  /**
+   * Evaluates the full wallet state including all open positions.
+   * Modifies the positions in-place with new pnl/margin and returns the wallet metrics.
+   */
+  static evaluateWallet(walletBalance, positions, allPrices = {}) {
+    let usedMargin = 0;
+    let totalPnl = 0;
+    for (const pos of positions) {
+      const { pnl, marginUsed } = PositionManager.evaluateLivePosition(pos, allPrices);
+      pos.pnl = pnl;
+      pos.marginUsed = marginUsed;
+      usedMargin += marginUsed;
+      totalPnl += pnl;
+    }
+    const safeBalance = Number(walletBalance) || 0;
+    const equity = AccountCalculator.calculateEquity(safeBalance, totalPnl);
+    const freeMargin = AccountCalculator.calculateFreeMargin(equity, usedMargin);
+    const marginLevel = AccountCalculator.calculateMarginLevel(equity, usedMargin);
+    const riskState = RiskCalculator.evaluateRisk(marginLevel);
+    return {
+      equity,
+      usedMargin,
+      freeMargin,
+      marginLevel,
+      riskState,
+      totalPnl
+    };
+  }
+  /**
+   * Pre-trade validation wrapper.
+   */
+  static validateOrder(symbol, side, volume, freeMargin, marginRequired, slPrice, tpPrice, entryPrice, marketEnabled = true) {
+    OrderValidator.validateNewOrder(
+      symbol,
+      side,
+      volume,
+      marginRequired,
+      freeMargin,
+      slPrice,
+      tpPrice,
+      entryPrice,
+      marketEnabled
+    );
   }
 };
 
 // src/services/marginEngine.ts
 var MarginEngine = class {
   static async calculateMargin(userId, positions, prices) {
-    let usedMargin = 0;
-    let totalPnl = 0;
-    for (const pos of positions) {
-      if (pos.status !== "OPEN") continue;
-      const currentPriceObj = prices[pos.symbol];
-      const currentPrice = currentPriceObj ? currentPriceObj.price : pos.currentPrice || pos.openPrice;
-      const pnl = TradeUtils.calculatePnl(pos.type, pos.openPrice, currentPrice, pos.volume, pos.symbol, prices);
-      pos.currentPrice = currentPrice;
-      pos.pnl = pnl;
-      totalPnl += pnl;
-      const leverage = 100;
-      const contractSize = TradeUtils.getContractSize(pos.symbol);
-      let marginUsd = currentPrice * pos.volume * contractSize / leverage;
-      if (pos.symbol.startsWith("USD")) marginUsd = marginUsd / currentPrice;
-      usedMargin += marginUsd;
-      await pos.save();
-    }
     const wallet = await WalletModel.findOne({ userId });
-    if (wallet) {
-      const equity = wallet.balance + totalPnl;
-      wallet.equity = equity;
-      wallet.margin = usedMargin;
-      wallet.freeMargin = equity - usedMargin;
-      wallet.marginLevel = usedMargin > 0 ? equity / usedMargin * 100 : 0;
-      await wallet.save();
-      return wallet;
-    }
-    return null;
-  }
-  // Compute required margin for a hypothetical trade
-  static async computeRequiredMargin(symbol, price, volume) {
-    let leverage = 100;
-    try {
-      const sym = await SymbolModel.findOne({ symbol: symbol.toUpperCase() });
-      if (sym && sym.leverageLimit && Number.isFinite(sym.leverageLimit) && sym.leverageLimit > 0) {
-        leverage = sym.leverageLimit;
+    if (!wallet) return null;
+    const result = TradingEngine.evaluateWallet(wallet.balance, positions, prices);
+    for (const pos of positions) {
+      if (pos.status === "OPEN") {
+        await Promise.resolve().then(() => (init_Position(), Position_exports)).then(({ PositionModel: PositionModel2 }) => {
+          PositionModel2.updateOne(
+            { _id: pos._id, status: "OPEN" },
+            { $set: { pnl: pos.pnl, marginUsed: pos.marginUsed } }
+            // Note: we can optionally update currentPrice if we track it elsewhere, but Engine relies on live feeds.
+          ).exec();
+        });
       }
-    } catch (err) {
     }
-    const contractSize = TradeUtils.getContractSize(symbol);
-    const required = price * volume * contractSize / leverage;
-    if (symbol.toUpperCase().startsWith("USD")) {
-      return Math.max(0, Number((required / price).toFixed(6)));
-    }
-    return Math.max(0, Number(required.toFixed(6)));
+    wallet.equity = result.equity;
+    wallet.margin = result.usedMargin;
+    wallet.usedMargin = result.usedMargin;
+    wallet.freeMargin = result.freeMargin;
+    wallet.marginLevel = result.marginLevel === Infinity ? 0 : result.marginLevel;
+    wallet.pnl = result.totalPnl;
+    await wallet.save();
+    return wallet;
   }
   static async validateMarginForTrade(userId, symbol, price, volume) {
     const wallet = await WalletModel.findOne({ userId });
     if (!wallet) return { ok: false, reason: "WALLET_NOT_FOUND" };
     if (wallet.status !== "ACTIVE") return { ok: false, reason: "WALLET_INACTIVE" };
-    const required = await this.computeRequiredMargin(symbol, price, volume);
+    const spec = SymbolSpecification.getSync(symbol);
+    const leverage = spec.leverageLimit || 100;
+    let usdRate = 1;
+    const sym = spec.symbol.toUpperCase();
+    if (!sym.endsWith("USD") && !sym.startsWith("USD")) {
+      const quoteCurrency = sym.substring(3);
+      if (quoteCurrency === "JPY") {
+        const { MarketService: MarketService2 } = await Promise.resolve().then(() => (init_market_service(), market_service_exports));
+        const crossQuote = await MarketService2.getQuote("USDJPY");
+        if (crossQuote && crossQuote.price > 0) usdRate = 1 / crossQuote.price;
+      } else if (quoteCurrency === "GBP") {
+        const { MarketService: MarketService2 } = await Promise.resolve().then(() => (init_market_service(), market_service_exports));
+        const crossQuote = await MarketService2.getQuote("GBPUSD");
+        if (crossQuote && crossQuote.price > 0) usdRate = crossQuote.price;
+      }
+    } else if (sym.startsWith("USD") && sym !== "USDUSD") {
+      const currentMid = price;
+      usdRate = currentMid > 0 ? 1 / currentMid : 1;
+    }
+    const required = MarginCalculator.calculate(symbol, volume, price, leverage, usdRate);
     const free = Number(wallet.freeMargin ?? 0);
     const balance = Number(wallet.balance ?? 0);
-    if (balance <= 0) return { ok: false, reason: "INSUFFICIENT_BALANCE" };
-    if (required > free) return { ok: false, reason: "INSUFFICIENT_FREE_MARGIN" };
-    if (required > balance) return { ok: false, reason: "REQUIRED_EXCEEDS_BALANCE" };
+    if (required > free) {
+      return { ok: false, reason: "INSUFFICIENT_FREE_MARGIN" };
+    }
     return { ok: true, required, free, balance };
   }
 };
@@ -968,41 +1430,134 @@ init_Wallet();
 var StopLossEngine = class {
   static async evaluatePositions(positions, prices) {
     const closedPositions = [];
+    const { SymbolModel: SymbolModel2 } = await Promise.resolve().then(() => (init_Symbol(), Symbol_exports));
+    const allSymbols = await SymbolModel2.find({});
+    const symbolMap = allSymbols.reduce((acc, s) => {
+      acc[s.symbol] = s;
+      return acc;
+    }, {});
     for (const pos of positions) {
       if (pos.status !== "OPEN") continue;
+      const symSpec = symbolMap[pos.symbol.toUpperCase()];
+      const contractSize = symSpec ? symSpec.contractSize : 1e5;
       const currentPriceObj = prices[pos.symbol];
       if (!currentPriceObj) continue;
-      const currentPrice = currentPriceObj.price;
+      const currentBid = currentPriceObj.bid;
+      const currentAsk = currentPriceObj.ask;
       let shouldClose = false;
+      let closePrice = 0;
       if (pos.type === "BUY") {
-        if (pos.sl && currentPrice <= pos.sl) shouldClose = true;
-        if (pos.tp && currentPrice >= pos.tp) shouldClose = true;
+        if (pos.sl && currentBid <= pos.sl) {
+          shouldClose = true;
+          closePrice = currentBid;
+        }
+        if (pos.tp && currentBid >= pos.tp) {
+          shouldClose = true;
+          closePrice = currentBid;
+        }
       } else if (pos.type === "SELL") {
-        if (pos.sl && currentPrice >= pos.sl) shouldClose = true;
-        if (pos.tp && currentPrice <= pos.tp) shouldClose = true;
+        if (pos.sl && currentAsk >= pos.sl) {
+          shouldClose = true;
+          closePrice = currentAsk;
+        }
+        if (pos.tp && currentAsk <= pos.tp) {
+          shouldClose = true;
+          closePrice = currentAsk;
+        }
       }
       if (shouldClose) {
-        pos.status = "CLOSED";
-        pos.closePrice = currentPrice;
-        const pnl = TradeUtils.calculatePnl(pos.type, pos.openPrice, currentPrice, pos.volume, pos.symbol, prices);
-        pos.pnl = pnl;
-        await pos.save();
-        const wallet = await WalletModel.findOne({ userId: pos.userId });
-        if (wallet) {
-          wallet.balance += pnl;
-          await wallet.save();
-          const openPositions = await PositionModel.find({ userId: pos.userId, status: "OPEN" });
-          await MarginEngine.calculateMargin(pos.userId.toString(), openPositions, prices);
+        const pnl = ProfitCalculator2.calculate(
+          pos.type,
+          pos.openPrice,
+          closePrice,
+          closePrice,
+          pos.volume,
+          pos.symbol
+        );
+        const { PositionModel: PositionModel2 } = await Promise.resolve().then(() => (init_Position(), Position_exports));
+        const updatedPos = await PositionModel2.findOneAndUpdate(
+          { _id: pos._id, status: "OPEN" },
+          { $set: { status: "CLOSED", closePrice, pnl } },
+          { new: true }
+        );
+        if (updatedPos) {
+          const wallet = await WalletModel.findOne({ userId: pos.userId });
+          if (wallet) {
+            wallet.balance += pnl;
+            await wallet.save();
+            const openPositions = await PositionModel2.find({ userId: pos.userId, status: "OPEN" });
+            await MarginEngine.calculateMargin(pos.userId.toString(), openPositions, prices);
+          }
+          closedPositions.push(updatedPos);
         }
-        closedPositions.push(pos);
       }
     }
     return closedPositions;
   }
 };
 
-// src/services/orderExecutionEngine.ts
+// src/services/stopOutEngine.ts
 init_Wallet();
+init_Position();
+init_market_service();
+init_Symbol();
+var StopOutEngine = class {
+  // Threshold for margin call / stop out (50%)
+  static STOP_OUT_LEVEL = 50;
+  static async evaluateStopOut(userId, wallet, positions, prices) {
+    if (wallet.marginLevel > 0 && wallet.marginLevel < this.STOP_OUT_LEVEL) {
+      console.log(`[STOP OUT WARNING] User ${userId} margin level (${wallet.marginLevel.toFixed(2)}%) is below ${this.STOP_OUT_LEVEL}%. Executing Stop Out.`);
+      const openPositions = positions.filter((p) => p.status === "OPEN");
+      if (openPositions.length === 0) return;
+      openPositions.sort((a, b) => (a.pnl || 0) - (b.pnl || 0));
+      const worstPosition = openPositions[0];
+      try {
+        const quote = prices[worstPosition.symbol] || await MarketService.getQuote(worstPosition.symbol);
+        if (!quote) return;
+        const closePrice = worstPosition.type === "BUY" ? quote.bid : quote.ask;
+        const sym = await SymbolModel.findOne({ symbol: worstPosition.symbol.toUpperCase() });
+        const contractSize = sym ? sym.contractSize : 1e5;
+        const finalPnl = ProfitCalculator2.calculate(
+          worstPosition.type,
+          worstPosition.openPrice,
+          closePrice,
+          closePrice,
+          worstPosition.volume,
+          worstPosition.symbol
+        );
+        const updatedPos = await PositionModel.findOneAndUpdate(
+          { _id: worstPosition._id, status: "OPEN" },
+          { $set: { status: "CLOSED", closePrice, pnl: finalPnl } },
+          { new: true }
+        );
+        if (updatedPos) {
+          const updatedWallet = await WalletModel.findOne({ userId });
+          if (updatedWallet) {
+            updatedWallet.balance += finalPnl;
+            await updatedWallet.save();
+          }
+          console.log(`[STOP OUT EXECUTED] Closed position ${updatedPos._id} for user ${userId} with PNL: ${finalPnl}`);
+          const io = SocketServer.getIO();
+          if (io) {
+            io.to(userId.toString()).emit("notification", {
+              type: "ERROR",
+              title: "Stop Out Executed",
+              message: `Position ${worstPosition.symbol} was automatically closed due to insufficient margin.`
+            });
+          }
+        }
+      } catch (err) {
+        console.error(`[STOP OUT ERROR] Failed to close position ${worstPosition._id}:`, err);
+      }
+    }
+  }
+};
+
+// src/services/orderExecutionEngine.ts
+init_Position();
+init_Wallet();
+init_Symbol();
+init_market_service();
 
 // src/models/Notification.ts
 var import_mongoose9 = __toESM(require("mongoose"), 1);
@@ -1124,6 +1679,7 @@ var PriceEngine = class {
       }
     }, 250);
   }
+  static lastUserPositionCount = {};
   static async updateTick() {
     const newPrices = await MarketService.getQuotes(this.symbols);
     const changedQuotes = Object.entries(newPrices).filter(([symbol, quote]) => {
@@ -1144,10 +1700,20 @@ var PriceEngine = class {
     const openPositions = await PositionModel.find({ status: "OPEN" });
     const pendingOrders = await OrderModel.find({ status: "PENDING" });
     const positionsByUser = this.groupByUser(openPositions);
-    for (const userId of Object.keys(positionsByUser)) {
-      const userPositions = positionsByUser[userId];
+    const currentUsers = new Set(Object.keys(positionsByUser));
+    for (const userId of Object.keys(this.lastUserPositionCount)) {
+      if (this.lastUserPositionCount[userId] > 0) {
+        currentUsers.add(userId);
+      }
+    }
+    for (const userId of currentUsers) {
+      const userPositions = positionsByUser[userId] || [];
+      this.lastUserPositionCount[userId] = userPositions.length;
       const closedPos = await StopLossEngine.evaluatePositions(userPositions, this.currentPrices);
       const wallet = await MarginEngine.calculateMargin(userId, userPositions, this.currentPrices);
+      if (wallet) {
+        await StopOutEngine.evaluateStopOut(userId, wallet, userPositions, this.currentPrices);
+      }
       SocketServer.broadcastPnlUpdate(userId, userPositions);
       if (wallet) {
         SocketServer.broadcastWalletUpdate(userId, wallet);
@@ -1182,11 +1748,33 @@ var getWallet = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+var fundWallet = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { amount } = req.body;
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: "Invalid amount" });
+    }
+    let wallet = await WalletModel.findOne({ userId });
+    if (!wallet) {
+      wallet = await WalletModel.create({ userId, balance: amount, freeMargin: amount, equity: amount });
+    } else {
+      wallet.balance += amount;
+      wallet.freeMargin += amount;
+      wallet.equity += amount;
+      await wallet.save();
+    }
+    res.json(wallet);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
 
 // src/routes/walletRoutes.ts
 var router3 = (0, import_express3.Router)();
 router3.use(protect);
 router3.get("/", getWallet);
+router3.post("/fund", fundWallet);
 var walletRoutes_default = router3;
 
 // src/routes/depositRoutes.ts
@@ -1622,7 +2210,9 @@ var kycRoutes_default = router6;
 var import_express7 = require("express");
 
 // src/controllers/tradingController.ts
+init_Position();
 init_Wallet();
+init_market_service();
 var getPositions = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -1649,62 +2239,72 @@ var createPosition = async (req, res) => {
   try {
     const userId = req.user.id;
     const { symbol, type, volume, openPrice, sl, tp } = req.body;
+    const parsedVolume = Number(volume);
+    const parsedPrice = openPrice ? Number(openPrice) : 0;
     const user = await UserModel.findById(userId);
     if (!user || user.status !== "ACTIVE") return res.status(403).json({ error: "User not allowed to trade" });
-    const wallet = await WalletModel.findOne({ userId });
+    const currentOpenPositions = await PositionModel.find({ userId, status: "OPEN" });
+    let wallet = await WalletModel.findOne({ userId });
     if (!wallet) return res.status(402).json({ error: "Insufficient funds: wallet not found" });
     if (wallet.status !== "ACTIVE") return res.status(403).json({ error: "Wallet is not active" });
-    const sym = await SymbolModel.findOne({ symbol: symbol.toUpperCase() });
-    if (!sym || !sym.isActive) {
-      console.error("400: Inactive or invalid symbol");
-      return res.status(400).json({ error: "Inactive or invalid symbol" });
-    }
+    const allPrices = {};
+    const walletState = TradingEngine.evaluateWallet(wallet.balance, currentOpenPositions, allPrices);
+    const spec = await SymbolSpecification.get(symbol);
+    if (!spec || !spec.isActive) return res.status(400).json({ error: "Disabled Symbol" });
     const quote = await MarketService.getQuote(symbol);
-    if (!quote) {
-      console.error("503: Market data unavailable");
-      return res.status(503).json({ error: "Market data unavailable" });
+    if (!quote) return res.status(503).json({ error: "Market data unavailable" });
+    if (quote.marketStatus === "CLOSED") return res.status(400).json({ error: "Market closed" });
+    let priceToUse = parsedPrice > 0 ? parsedPrice : PriceService.getExecutionPrice(symbol, type, spec.spread, spec.digits);
+    if (!priceToUse || priceToUse <= 0) return res.status(400).json({ error: "Invalid price" });
+    let usdRate = 1;
+    const sym = spec.symbol.toUpperCase();
+    if (!sym.endsWith("USD") && !sym.startsWith("USD")) {
+      const quoteCurrency = sym.substring(3);
+      if (quoteCurrency === "JPY") {
+        const crossQuote = await MarketService.getQuote("USDJPY");
+        if (crossQuote && crossQuote.price > 0) usdRate = 1 / crossQuote.price;
+      } else if (quoteCurrency === "GBP") {
+        const crossQuote = await MarketService.getQuote("GBPUSD");
+        if (crossQuote && crossQuote.price > 0) usdRate = crossQuote.price;
+      }
+    } else if (sym.startsWith("USD") && sym !== "USDUSD") {
+      const currentMid = priceToUse;
+      usdRate = currentMid > 0 ? 1 / currentMid : 1;
     }
-    if (quote.marketStatus === "CLOSED") {
-      console.error("400: Market closed");
-      return res.status(400).json({ error: "Market closed" });
-    }
-    const priceToUse = openPrice && Number(openPrice) > 0 ? Number(openPrice) : quote.price;
-    if (!priceToUse || priceToUse <= 0) {
-      console.error("400: Invalid price");
-      return res.status(400).json({ error: "Invalid price" });
-    }
-    if (!volume || Number(volume) <= 0) {
-      console.error("400: Invalid lot size");
-      return res.status(400).json({ error: "Invalid lot size" });
-    }
-    const marginCheck = await MarginEngine.validateMarginForTrade(userId, sym.symbol, priceToUse, Number(volume));
-    if (!marginCheck.ok) {
-      const reason = marginCheck.reason || "INSUFFICIENT_MARGIN";
-      const map = {
-        INSUFFICIENT_BALANCE: "Insufficient balance",
-        INSUFFICIENT_FREE_MARGIN: "Insufficient free margin",
-        REQUIRED_EXCEEDS_BALANCE: "Required margin exceeds balance",
-        WALLET_NOT_FOUND: "Wallet not found",
-        WALLET_INACTIVE: "Wallet inactive"
-      };
-      return res.status(402).json({ error: map[reason] || "Insufficient margin" });
+    const marginRequired = MarginCalculator.calculate(symbol, parsedVolume, priceToUse, spec.leverageLimit || 100, usdRate);
+    try {
+      TradingEngine.validateOrder(
+        symbol,
+        type,
+        parsedVolume,
+        walletState.freeMargin,
+        marginRequired,
+        sl,
+        tp,
+        priceToUse,
+        true
+      );
+    } catch (err) {
+      return res.status(402).json({ error: err.message });
     }
     const position = await PositionModel.create({
       userId,
-      symbol: sym.symbol,
+      symbol: spec.symbol,
       type,
-      volume: Number(volume),
+      volume: parsedVolume,
       openPrice: priceToUse,
       currentPrice: priceToUse,
       sl,
       tp,
       status: "OPEN",
-      pnl: 0
+      pnl: 0,
+      marginUsed: marginRequired
     });
-    const openPositions = await PositionModel.find({ userId, status: "OPEN" });
-    await MarginEngine.calculateMargin(userId, openPositions, {});
+    const updatedPositions = await PositionModel.find({ userId, status: "OPEN" });
+    await MarginEngine.calculateMargin(userId, updatedPositions, {});
     res.status(201).json(position);
   } catch (error) {
+    console.error(`Error in createPosition:`, error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -1712,16 +2312,28 @@ var closePosition = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
-    const position = await PositionModel.findOne({ _id: id, userId });
-    if (!position) return res.status(404).json({ error: "Position not found" });
+    const position = await PositionModel.findOne({ _id: id, userId, status: "OPEN" });
+    if (!position) return res.status(404).json({ error: "Position not found or already closed" });
+    const spec = await SymbolSpecification.get(position.symbol);
+    let closePrice = req.body.closePrice;
+    if (!closePrice) {
+      closePrice = PriceService.getExecutionPrice(position.symbol, position.type === "BUY" ? "SELL" : "BUY", spec.spread, spec.digits);
+    }
     position.status = "CLOSED";
-    position.closePrice = req.body.closePrice || position.currentPrice;
+    position.closePrice = closePrice;
+    position.pnl = ProfitCalculator2.calculate(
+      position.type,
+      position.openPrice,
+      closePrice,
+      closePrice,
+      position.volume,
+      position.symbol
+    );
     await position.save();
     const wallet = await WalletModel.findOne({ userId });
     if (wallet) {
       wallet.balance += position.pnl;
-      wallet.pnl -= position.pnl;
-      wallet.equity = wallet.balance + wallet.pnl;
+      wallet.equity = wallet.balance;
       await wallet.save();
       const openPositions = await PositionModel.find({ userId, status: "OPEN" });
       await MarginEngine.calculateMargin(userId, openPositions, {});
@@ -1776,6 +2388,97 @@ var cancelOrder = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+var modifyOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const { targetPrice, sl, tp } = req.body;
+    const order = await OrderModel.findOne({ _id: id, userId, status: "PENDING" });
+    if (!order) return res.status(404).json({ error: "Order not found or not pending" });
+    if (targetPrice !== void 0) order.targetPrice = targetPrice;
+    if (sl !== void 0) order.sl = sl;
+    if (tp !== void 0) order.tp = tp;
+    await order.save();
+    res.json(order);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+var modifyPosition = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const { sl, tp } = req.body;
+    const position = await PositionModel.findOne({ _id: id, userId, status: "OPEN" });
+    if (!position) return res.status(404).json({ error: "Position not found or already closed" });
+    if (sl !== void 0) position.sl = sl;
+    if (tp !== void 0) position.tp = tp;
+    await position.save();
+    res.json(position);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+var partialClosePosition = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const { volume } = req.body;
+    const closeVol = Number(volume);
+    if (isNaN(closeVol) || closeVol <= 0) return res.status(400).json({ error: "Invalid volume to close" });
+    const position = await PositionModel.findOne({ _id: id, userId, status: "OPEN" });
+    if (!position) return res.status(404).json({ error: "Position not found" });
+    if (closeVol >= position.volume) {
+      req.body.closePrice = void 0;
+      return closePosition(req, res);
+    }
+    const spec = await SymbolSpecification.get(position.symbol);
+    let closePrice = req.body.closePrice;
+    if (!closePrice) {
+      closePrice = PriceService.getExecutionPrice(position.symbol, position.type === "BUY" ? "SELL" : "BUY", spec.spread, spec.digits);
+    }
+    const fullPnl = ProfitCalculator2.calculate(
+      position.type,
+      position.openPrice,
+      closePrice,
+      closePrice,
+      position.volume,
+      position.symbol
+    );
+    const { realizedPnl, remainingVolume } = PositionManager.calculatePartialClose(position, closeVol, fullPnl);
+    await PositionModel.create({
+      userId,
+      symbol: position.symbol,
+      type: position.type,
+      volume: closeVol,
+      openPrice: position.openPrice,
+      currentPrice: closePrice,
+      closePrice,
+      sl: position.sl,
+      tp: position.tp,
+      pnl: realizedPnl,
+      commission: position.commission * (closeVol / position.volume),
+      swap: position.swap * (closeVol / position.volume),
+      marginUsed: 0,
+      status: "CLOSED"
+    });
+    position.volume = remainingVolume;
+    position.commission -= position.commission * (closeVol / (position.volume + closeVol));
+    position.swap -= position.swap * (closeVol / (position.volume + closeVol));
+    await position.save();
+    const wallet = await WalletModel.findOne({ userId });
+    if (wallet) {
+      wallet.balance += realizedPnl;
+      wallet.equity = wallet.balance;
+      await wallet.save();
+      const openPositions = await PositionModel.find({ userId, status: "OPEN" });
+      await MarginEngine.calculateMargin(userId, openPositions, {});
+    }
+    res.json({ message: "Position partially closed", remainingPosition: position });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
 
 // src/routes/tradingRoutes.ts
 var router7 = (0, import_express7.Router)();
@@ -1788,6 +2491,9 @@ router7.post("/positions/:id/close", closePosition);
 router7.get("/orders", getOrders);
 router7.post("/orders", createOrder);
 router7.post("/orders/:id/cancel", cancelOrder);
+router7.post("/orders/:id/modify", modifyOrder);
+router7.post("/positions/:id/modify", modifyPosition);
+router7.post("/positions/:id/partial-close", partialClosePosition);
 var tradingRoutes_default = router7;
 
 // src/routes/copyTradingRoutes.ts
@@ -2000,6 +2706,8 @@ var import_express11 = require("express");
 
 // src/controllers/adminController.ts
 init_Wallet();
+init_Position();
+init_Symbol();
 
 // src/models/News.ts
 var import_mongoose18 = __toESM(require("mongoose"), 1);
@@ -2253,6 +2961,24 @@ var toggleSymbol = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+var modifySymbol = async (req, res) => {
+  try {
+    const symbolCode = String(req.params.symbol || "").toUpperCase();
+    const { leverageLimit, spread, minLot, maxLot, lotStep } = req.body;
+    const symbol = await SymbolModel.findOne({ symbol: symbolCode });
+    if (!symbol) return res.status(404).json({ error: "Symbol not found" });
+    if (leverageLimit !== void 0) symbol.leverageLimit = Number(leverageLimit);
+    if (spread !== void 0) symbol.spread = Number(spread);
+    if (minLot !== void 0) symbol.minLot = Number(minLot);
+    if (maxLot !== void 0) symbol.maxLot = Number(maxLot);
+    if (lotStep !== void 0) symbol.lotStep = Number(lotStep);
+    await symbol.save();
+    await logAdminAction(req.user.id, "MODIFY_SYMBOL", { symbol: symbolCode, updates: req.body });
+    res.json(symbol);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
 var createNews = async (req, res) => {
   try {
     const { title, summary, content, category, source } = req.body;
@@ -2303,13 +3029,26 @@ var forceCloseTrade = async (req, res) => {
     if (position.status === "CLOSED") {
       return res.status(400).json({ error: "Position already closed" });
     }
+    const { MarketService: MarketService2 } = await Promise.resolve().then(() => (init_market_service(), market_service_exports));
+    const { TradeUtils: TradeUtils2 } = await Promise.resolve().then(() => (init_tradeUtils(), tradeUtils_exports));
+    const quote = await MarketService2.getQuote(position.symbol);
+    if (!quote) return res.status(503).json({ error: "Market data unavailable" });
     position.status = "CLOSED";
-    position.closePrice = position.currentPrice;
+    position.closePrice = position.type === "BUY" ? quote.bid : quote.ask;
+    const sym = await SymbolModel.findOne({ symbol: position.symbol.toUpperCase() });
+    position.pnl = ProfitCalculator.calculate(
+      position.type,
+      position.openPrice,
+      position.closePrice,
+      position.closePrice,
+      position.volume,
+      position.symbol
+    );
     await position.save();
     const wallet = await WalletModel.findOne({ userId: position.userId });
     if (wallet) {
       wallet.balance += position.pnl;
-      wallet.pnl -= position.pnl;
+      wallet.equity = wallet.balance;
       await wallet.save();
       const openPositions = await PositionModel.find({ userId: position.userId, status: "OPEN" });
       await MarginEngine.calculateMargin(position.userId.toString(), openPositions, {});
@@ -2428,6 +3167,7 @@ router11.post("/withdrawals/:id/approve", approveWithdrawal);
 router11.post("/withdrawals/:id/reject", rejectWithdrawal);
 router11.post("/symbols", createSymbol);
 router11.post("/symbols/:symbol/toggle", toggleSymbol);
+router11.post("/symbols/:symbol/modify", modifySymbol);
 router11.post("/news", createNews);
 router11.post("/notifications", dispatchNotification);
 router11.post("/trades/force-close/:posId", forceCloseTrade);
@@ -2491,6 +3231,8 @@ var paymentSettingsRoutes_default = router12;
 var import_express13 = __toESM(require("express"), 1);
 
 // src/controllers/market.controller.ts
+init_market_service();
+init_symbolMapper();
 var getTickers = async (req, res) => {
   try {
     const symbols = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD", "EURJPY", "EURGBP", "GBPJPY", "XAUUSD", "XAGUSD", "BTCUSD", "ETHUSD"];
