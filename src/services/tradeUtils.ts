@@ -9,16 +9,25 @@ export class TradeUtils {
     return 100000;
   }
 
-  static calculatePnl(type: 'BUY' | 'SELL', openPrice: number, currentPrice: number, volume: number, symbol: string, allPrices: Record<string, any> = {}): number {
-    const contractSize = this.getContractSize(symbol);
+  static calculatePnl(
+    type: 'BUY' | 'SELL', 
+    openPrice: number, 
+    currentBid: number,
+    currentAsk: number,
+    volume: number, 
+    symbol: string, 
+    allPrices: Record<string, any> = {},
+    contractSizeOverride?: number
+  ): number {
+    const contractSize = contractSizeOverride || this.getContractSize(symbol);
     const sym = symbol.toUpperCase();
     
     // Raw PNL in Quote Currency
     let rawPnl = 0;
     if (type === 'BUY') {
-      rawPnl = (currentPrice - openPrice) * volume * contractSize;
+      rawPnl = (currentBid - openPrice) * volume * contractSize;
     } else {
-      rawPnl = (openPrice - currentPrice) * volume * contractSize;
+      rawPnl = (openPrice - currentAsk) * volume * contractSize;
     }
 
     // Convert to USD if the quote currency is not USD
@@ -26,11 +35,13 @@ export class TradeUtils {
       return rawPnl;
     } else if (sym.startsWith('USD')) {
       // USDJPY, USDCAD, USDCHF -> Quote is JPY, CAD, CHF. We divide by the current rate to get USD.
+      const currentPrice = (currentBid + currentAsk) / 2;
       return rawPnl / currentPrice;
     } else {
       // Cross pairs like EURGBP, EURJPY, GBPJPY
       // Quote is the last 3 chars. We need the rate of QuoteUSD or USDQuote.
       const quoteCurrency = sym.substring(3);
+      const currentPrice = (currentBid + currentAsk) / 2;
       
       // E.g., JPY -> we need USDJPY
       if (quoteCurrency === 'JPY') {

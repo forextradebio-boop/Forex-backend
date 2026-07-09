@@ -64,6 +64,12 @@ export class MarketService {
     return fetchPromise;
   }
 
+  static getPrice(symbol: string): number | null {
+    const normalized = this.normalizeSymbol(symbol);
+    if (!normalized) return null;
+    return this.priceCache.get(`quote:${normalized}`)?.value?.price || null;
+  }
+
   static async getQuotes(symbols: string[]) {
     const results: Record<string, any> = {};
     const uniqueSymbols = [...new Set(symbols.map((symbol) => this.normalizeSymbol(symbol)).filter(Boolean))];

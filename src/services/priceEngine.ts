@@ -4,6 +4,7 @@ import { PositionModel } from '../models/Position';
 import { OrderModel } from '../models/Order';
 import { MarginEngine } from './marginEngine';
 import { StopLossEngine } from './stopLossEngine';
+import { StopOutEngine } from './stopOutEngine';
 import { OrderExecutionEngine } from './orderExecutionEngine';
 import { WalletModel } from '../models/Wallet';
 
@@ -27,6 +28,8 @@ export class PriceEngine {
       }
     }, 250);
   }
+
+  private static lastUserPositionCount: Record<string, number> = {};
 
   private static async updateTick() {
     const newPrices = await MarketService.getQuotes(this.symbols);
@@ -64,15 +67,30 @@ export class PriceEngine {
 
     // Group by user for efficient wallet updates
     const positionsByUser = this.groupByUser(openPositions);
+    const currentUsers = new Set(Object.keys(positionsByUser));
     
-    for (const userId of Object.keys(positionsByUser)) {
-      const userPositions = positionsByUser[userId];
+    // Ensure we also process users who HAD positions last tick, 
+    // so we can broadcast the empty [] array to them when they close their last position!
+    for (const userId of Object.keys(this.lastUserPositionCount)) {
+      if (this.lastUserPositionCount[userId] > 0) {
+        currentUsers.add(userId);
+      }
+    }
+    
+    for (const userId of currentUsers) {
+      const userPositions = positionsByUser[userId] || [];
+      this.lastUserPositionCount[userId] = userPositions.length;
       
       // Stop Loss & Take Profit Engine
       const closedPos = await StopLossEngine.evaluatePositions(userPositions, this.currentPrices);
       
       // Margin Engine & PNL recalculation
       const wallet = await MarginEngine.calculateMargin(userId, userPositions, this.currentPrices);
+      
+      // Stop Out Engine
+      if (wallet) {
+        await StopOutEngine.evaluateStopOut(userId, wallet, userPositions, this.currentPrices);
+      }
       
       // Broadcast user specific updates
       SocketServer.broadcastPnlUpdate(userId, userPositions);

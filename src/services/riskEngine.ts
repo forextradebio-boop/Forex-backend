@@ -2,6 +2,7 @@ import { PositionModel } from '../models/Position';
 import { WalletModel } from '../models/Wallet';
 import { NotificationModel } from '../models/Notification';
 import { SocketServer } from './socketServer';
+import { ProfitCalculator } from '../engine/ProfitCalculator';
 
 export class RiskEngine {
   static async evaluateRisk(userId: string, currentPrices: Record<string, any>) {
@@ -23,22 +24,51 @@ export class RiskEngine {
 
     // Check auto liquidation (margin level < 20%)
     if (marginLevel > 0 && marginLevel < 20) {
+      // Pre-fetch all symbols for accurate contract sizes
+      const { SymbolModel } = await import('../models/Symbol');
+      const allSymbols = await SymbolModel.find({});
+      const symbolMap = allSymbols.reduce((acc, s) => { acc[s.symbol] = s; return acc; }, {} as Record<string, any>);
+      const { TradeUtils } = await import('./tradeUtils');
+
       // Auto liquidate all open positions
       const openPositions = await PositionModel.find({ userId, status: 'OPEN' });
       for (const pos of openPositions) {
+        const symSpec = symbolMap[pos.symbol.toUpperCase()];
+        const contractSize = symSpec ? symSpec.contractSize : 100000;
+
         pos.status = 'CLOSED';
         const currentPriceObj = currentPrices[pos.symbol];
-        const currentPrice = currentPriceObj ? currentPriceObj.price : pos.currentPrice || pos.openPrice;
-        pos.closePrice = currentPrice;
+        const currentBid = currentPriceObj ? currentPriceObj.bid : pos.openPrice;
+        const currentAsk = currentPriceObj ? currentPriceObj.ask : pos.openPrice;
         
-        let pnl = 0;
-        if (pos.type === 'BUY') pnl = (currentPrice - pos.openPrice) * pos.volume;
-        else pnl = (pos.openPrice - currentPrice) * pos.volume;
+        let closePrice = 0;
+        if (pos.type === 'BUY') {
+          closePrice = currentBid;
+        } else {
+          closePrice = currentAsk;
+        }
         
-        pos.pnl = pnl;
-        await pos.save();
+        pos.closePrice = closePrice;
+        
+        const pnl = ProfitCalculator.calculate(
+          pos.type,
+          pos.openPrice,
+          closePrice,
+          closePrice,
+          pos.volume,
+          pos.symbol
+        );
+        
+        // ONLY update if it's still OPEN in the database to prevent double-close exploits!
+        const updatedPos = await PositionModel.findOneAndUpdate(
+          { _id: pos._id, status: 'OPEN' },
+          { $set: { status: 'CLOSED', closePrice, pnl } },
+          { new: true }
+        );
 
-        wallet.balance += pnl;
+        if (updatedPos) {
+          wallet.balance += pnl;
+        }
       }
       wallet.usedMargin = 0;
       wallet.freeMargin = wallet.balance;
