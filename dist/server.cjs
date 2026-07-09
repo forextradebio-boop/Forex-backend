@@ -58,7 +58,7 @@ var init_Wallet = __esm({
       this.balance = Math.max(0, roundToTwo(this.balance));
       this.equity = Math.max(0, roundToTwo(this.equity));
       this.margin = Math.max(0, roundToTwo(this.margin));
-      this.pnl = roundToTwo(this.pnl);
+      this.pnl = this.pnl;
       this.freeMargin = Math.max(0, roundToTwo(this.equity - this.margin));
     });
     WalletSchema.pre("findOneAndUpdate", async function() {
@@ -67,7 +67,7 @@ var init_Wallet = __esm({
         if (update.$set.balance !== void 0) update.$set.balance = Math.max(0, roundToTwo(update.$set.balance));
         if (update.$set.equity !== void 0) update.$set.equity = Math.max(0, roundToTwo(update.$set.equity));
         if (update.$set.margin !== void 0) update.$set.margin = Math.max(0, roundToTwo(update.$set.margin));
-        if (update.$set.pnl !== void 0) update.$set.pnl = roundToTwo(update.$set.pnl);
+        if (update.$set.pnl !== void 0) update.$set.pnl = update.$set.pnl;
         if (update.$set.equity !== void 0 || update.$set.margin !== void 0) {
         }
         if (update.$set.freeMargin !== void 0) {
@@ -473,19 +473,52 @@ var init_market_service = __esm({
   }
 });
 
+// src/models/Symbol.ts
+var Symbol_exports = {};
+__export(Symbol_exports, {
+  SymbolModel: () => SymbolModel
+});
+var import_mongoose6, SymbolSchema, SymbolModel;
+var init_Symbol = __esm({
+  "src/models/Symbol.ts"() {
+    "use strict";
+    import_mongoose6 = __toESM(require("mongoose"), 1);
+    SymbolSchema = new import_mongoose6.Schema(
+      {
+        symbol: { type: String, required: true, unique: true, uppercase: true, trim: true },
+        name: { type: String, required: true },
+        category: { type: String, required: true, default: "FOREX" },
+        price: { type: Number, required: true, default: 0 },
+        leverageLimit: { type: Number, required: true, default: 500 },
+        spread: { type: Number, required: true, default: 1 },
+        contractSize: { type: Number, required: true, default: 1e5 },
+        digits: { type: Number, required: true, default: 5 },
+        tickSize: { type: Number },
+        tickValue: { type: Number },
+        minLot: { type: Number, required: true, default: 0.01 },
+        maxLot: { type: Number, required: true, default: 100 },
+        lotStep: { type: Number, required: true, default: 0.01 },
+        isActive: { type: Boolean, default: true }
+      },
+      { timestamps: true }
+    );
+    SymbolModel = import_mongoose6.default.model("Symbol", SymbolSchema);
+  }
+});
+
 // src/models/Position.ts
 var Position_exports = {};
 __export(Position_exports, {
   PositionModel: () => PositionModel
 });
-var import_mongoose6, PositionSchema, PositionModel;
+var import_mongoose7, PositionSchema, PositionModel;
 var init_Position = __esm({
   "src/models/Position.ts"() {
     "use strict";
-    import_mongoose6 = __toESM(require("mongoose"), 1);
-    PositionSchema = new import_mongoose6.Schema(
+    import_mongoose7 = __toESM(require("mongoose"), 1);
+    PositionSchema = new import_mongoose7.Schema(
       {
-        userId: { type: import_mongoose6.Schema.Types.ObjectId, ref: "User", required: true },
+        userId: { type: import_mongoose7.Schema.Types.ObjectId, ref: "User", required: true },
         symbol: { type: String, required: true },
         type: { type: String, enum: ["BUY", "SELL"], required: true },
         volume: { type: Number, required: true },
@@ -502,38 +535,7 @@ var init_Position = __esm({
       },
       { timestamps: true }
     );
-    PositionModel = import_mongoose6.default.model("Position", PositionSchema);
-  }
-});
-
-// src/models/Symbol.ts
-var Symbol_exports = {};
-__export(Symbol_exports, {
-  SymbolModel: () => SymbolModel
-});
-var import_mongoose8, SymbolSchema, SymbolModel;
-var init_Symbol = __esm({
-  "src/models/Symbol.ts"() {
-    "use strict";
-    import_mongoose8 = __toESM(require("mongoose"), 1);
-    SymbolSchema = new import_mongoose8.Schema(
-      {
-        symbol: { type: String, required: true, unique: true, uppercase: true, trim: true },
-        name: { type: String, required: true },
-        category: { type: String, required: true, default: "FOREX" },
-        price: { type: Number, required: true, default: 0 },
-        leverageLimit: { type: Number, required: true, default: 100 },
-        spread: { type: Number, required: true, default: 1 },
-        contractSize: { type: Number, required: true, default: 1e5 },
-        digits: { type: Number, required: true, default: 5 },
-        minLot: { type: Number, required: true, default: 0.01 },
-        maxLot: { type: Number, required: true, default: 100 },
-        lotStep: { type: Number, required: true, default: 0.01 },
-        isActive: { type: Boolean, default: true }
-      },
-      { timestamps: true }
-    );
-    SymbolModel = import_mongoose8.default.model("Symbol", SymbolSchema);
+    PositionModel = import_mongoose7.default.model("Position", PositionSchema);
   }
 });
 
@@ -974,28 +976,6 @@ var SocketServer = class {
 
 // src/services/priceEngine.ts
 init_market_service();
-init_Position();
-
-// src/models/Order.ts
-var import_mongoose7 = __toESM(require("mongoose"), 1);
-var OrderSchema = new import_mongoose7.Schema(
-  {
-    userId: { type: import_mongoose7.Schema.Types.ObjectId, ref: "User", required: true },
-    symbol: { type: String, required: true },
-    type: { type: String, enum: ["BUY", "SELL", "BUY_LIMIT", "SELL_LIMIT", "BUY_STOP", "SELL_STOP"], required: true },
-    volume: { type: Number, required: true },
-    price: { type: Number },
-    targetPrice: { type: Number, required: true },
-    sl: { type: Number },
-    tp: { type: Number },
-    status: { type: String, enum: ["PENDING", "EXECUTED", "CANCELLED"], default: "PENDING" }
-  },
-  { timestamps: true }
-);
-var OrderModel = import_mongoose7.default.model("Order", OrderSchema);
-
-// src/services/marginEngine.ts
-init_Wallet();
 
 // src/engine/SymbolSpecification.ts
 init_Symbol();
@@ -1021,13 +1001,14 @@ var SymbolSpecification = class {
   static async get(symbol) {
     const sym = symbol.toUpperCase();
     if (this.cache.has(sym)) {
-      return this.cache.get(sym);
+      const dbSym = this.cache.get(sym);
+      return this.applyLeverageOverrides(dbSym);
     }
     try {
       const dbSym = await SymbolModel.findOne({ symbol: sym });
       if (dbSym) {
         this.cache.set(sym, dbSym);
-        return dbSym;
+        return this.applyLeverageOverrides(dbSym);
       }
     } catch (err) {
       console.warn(`[SymbolSpecification] DB error loading ${sym}:`, err);
@@ -1041,43 +1022,90 @@ var SymbolSpecification = class {
   static getSync(symbol) {
     const sym = symbol.toUpperCase();
     if (this.cache.has(sym)) {
-      return this.cache.get(sym);
+      const dbSym = this.cache.get(sym);
+      return this.applyLeverageOverrides(dbSym);
     }
     return this.getDefaults(sym);
+  }
+  static applyLeverageOverrides(symInfo) {
+    const sym = symInfo.symbol?.toUpperCase();
+    if (!sym) return symInfo;
+    if (symInfo.leverageLimit === 100) {
+      if (sym.startsWith("XAU") || sym.startsWith("XAG")) {
+        symInfo.leverageLimit = 500;
+      } else if (!sym.includes("BTC") && !sym.includes("ETH") && !sym.includes("US30") && !sym.includes("NAS100") && !sym.includes("SPX500")) {
+        symInfo.leverageLimit = 500;
+      }
+    }
+    return symInfo;
   }
   static getDefaults(symbol) {
     const sym = symbol.toUpperCase();
     let contractSize = 1e5;
     let digits = 5;
+    let leverageLimit = 500;
     if (sym.startsWith("XAU")) {
       contractSize = 100;
-      digits = 2;
+      digits = 3;
+      leverageLimit = 500;
     } else if (sym.startsWith("XAG")) {
       contractSize = 5e3;
       digits = 3;
+      leverageLimit = 500;
     } else if (["BTCUSD", "ETHUSD"].includes(sym)) {
       contractSize = 1;
       digits = 2;
+      leverageLimit = 100;
     } else if (["US30", "NAS100", "SPX500"].includes(sym)) {
       contractSize = 10;
       digits = 2;
+      leverageLimit = 100;
     } else if (sym.includes("JPY")) {
       contractSize = 1e5;
       digits = 3;
+      leverageLimit = 500;
     }
+    const tickSize = Math.pow(10, -digits);
+    const tickValue = tickSize * contractSize;
     return {
       symbol: sym,
       contractSize,
       digits,
+      tickSize,
+      tickValue,
       minLot: 0.01,
       maxLot: 100,
       lotStep: 0.01,
-      leverageLimit: 100,
+      leverageLimit,
       spread: 1,
       isActive: true
     };
   }
 };
+
+// src/services/priceEngine.ts
+init_Position();
+
+// src/models/Order.ts
+var import_mongoose8 = __toESM(require("mongoose"), 1);
+var OrderSchema = new import_mongoose8.Schema(
+  {
+    userId: { type: import_mongoose8.Schema.Types.ObjectId, ref: "User", required: true },
+    symbol: { type: String, required: true },
+    type: { type: String, enum: ["BUY", "SELL", "BUY_LIMIT", "SELL_LIMIT", "BUY_STOP", "SELL_STOP"], required: true },
+    volume: { type: Number, required: true },
+    price: { type: Number },
+    targetPrice: { type: Number, required: true },
+    sl: { type: Number },
+    tp: { type: Number },
+    status: { type: String, enum: ["PENDING", "EXECUTED", "CANCELLED"], default: "PENDING" }
+  },
+  { timestamps: true }
+);
+var OrderModel = import_mongoose8.default.model("Order", OrderSchema);
+
+// src/services/marginEngine.ts
+init_Wallet();
 
 // src/engine/ProfitCalculator.ts
 var ProfitCalculator2 = class {
@@ -1098,11 +1126,13 @@ var ProfitCalculator2 = class {
   static calculate(side, entryPrice, currentBid, currentAsk, volume, symbol, usdRate = 1) {
     const spec = SymbolSpecification.getSync(symbol);
     const contractSize = spec.contractSize || 1e5;
+    const tickSize = spec.tickSize || Math.pow(10, -(spec.digits || 5));
+    const tickValue = spec.tickValue || tickSize * contractSize;
     let rawProfit = 0;
     if (side === "BUY") {
-      rawProfit = (currentBid - entryPrice) * contractSize * volume;
+      rawProfit = (currentBid - entryPrice) / tickSize * tickValue * volume;
     } else {
-      rawProfit = (entryPrice - currentAsk) * contractSize * volume;
+      rawProfit = (entryPrice - currentAsk) / tickSize * tickValue * volume;
     }
     return rawProfit * usdRate;
   }
@@ -1111,15 +1141,17 @@ var ProfitCalculator2 = class {
 // src/engine/MarginCalculator.ts
 var MarginCalculator = class {
   /**
-   * Calculates required margin for an open position.
-   * Formula exactly as requested: (Price * Contract Size * Volume) / Leverage
-   * 
-   * @param symbol Symbol string (e.g., 'EURUSD')
-   * @param volume Lot size
-   * @param price Current market price (Mid price or specific Bid/Ask depending on execution)
-   * @param leverage Account or Symbol leverage
-   * @param usdRate Conversion rate to USD if margin is calculated in a foreign quote currency
-   */
+     * Calculates required margin for an open position.
+     * Formula exactly matches MT5 standards: (Price * Contract Size * Volume) / Leverage
+     * Note: For cross pairs, this is then converted to the account base currency via usdRate.
+     * 
+  
+     * @param symbol Symbol string (e.g., 'EURUSD')
+     * @param volume Lot size
+     * @param price Current market price (Mid price or specific Bid/Ask depending on execution)
+     * @param leverage Account or Symbol leverage
+     * @param usdRate Conversion rate to USD if margin is calculated in a foreign quote currency
+     */
   static calculate(symbol, volume, price, leverage, usdRate = 1) {
     const spec = SymbolSpecification.getSync(symbol);
     const contractSize = spec.contractSize || 1e5;
@@ -1149,8 +1181,8 @@ var PriceService = class {
     const bid = rawPrice;
     const ask = rawPrice + spreadValue;
     return {
-      bid: parseFloat(bid.toFixed(digits)),
-      ask: parseFloat(ask.toFixed(digits)),
+      bid: parseFloat(bid.toFixed(6)),
+      ask: parseFloat(ask.toFixed(6)),
       spread: spreadPips
     };
   }
@@ -1666,6 +1698,7 @@ var PriceEngine = class {
   static isRunning = false;
   static currentPrices = {};
   static symbols = MarketService.getWatchSymbols();
+  static tickOffsets = {};
   static start() {
     if (this.isRunning) return;
     this.isRunning = true;
@@ -1682,12 +1715,29 @@ var PriceEngine = class {
   static lastUserPositionCount = {};
   static async updateTick() {
     const newPrices = await MarketService.getQuotes(this.symbols);
-    const changedQuotes = Object.entries(newPrices).filter(([symbol, quote]) => {
-      const previous = this.currentPrices[symbol];
+    const changedQuotes = Object.entries(newPrices).map(([symbol, quote]) => {
+      const spec = SymbolSpecification.getSync(symbol);
+      if (!this.tickOffsets[symbol]) this.tickOffsets[symbol] = 0;
+      const tickSize = Math.pow(10, -(spec.digits || 5));
+      const walk = (Math.random() * 4 - 2) * tickSize;
+      this.tickOffsets[symbol] = Math.max(Math.min(this.tickOffsets[symbol] + walk, 5 * tickSize), -5 * tickSize);
+      const offset = this.tickOffsets[symbol];
+      const digits = spec.digits || 5;
+      return {
+        symbol,
+        ...quote,
+        price: Number((quote.price + offset).toFixed(digits)),
+        bid: Number((quote.bid + offset).toFixed(digits)),
+        ask: Number((quote.ask + offset).toFixed(digits))
+      };
+    }).filter((quote) => {
+      const previous = this.currentPrices[quote.symbol];
       if (!previous) return true;
       return previous.price !== quote.price || previous.bid !== quote.bid || previous.ask !== quote.ask || previous.high !== quote.high || previous.low !== quote.low || previous.open !== quote.open;
-    }).map(([symbol, quote]) => ({ symbol, ...quote }));
-    this.currentPrices = { ...this.currentPrices, ...newPrices };
+    });
+    for (const quote of changedQuotes) {
+      this.currentPrices[quote.symbol] = quote;
+    }
     if (changedQuotes.length > 0) {
       SocketServer.broadcastMarketUpdate(changedQuotes);
       SocketServer.broadcastPrices(
