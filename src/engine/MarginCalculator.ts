@@ -3,8 +3,10 @@ import { SymbolSpecification } from './SymbolSpecification';
 export class MarginCalculator {
   /**
    * Calculates required margin for an open position.
-   * Formula exactly as requested: (Price * Contract Size * Volume) / Leverage
+   * Formula exactly matches MT5 standards: (Price * Contract Size * Volume) / Leverage
+   * Note: For cross pairs, this is then converted to the account base currency via usdRate.
    * 
+
    * @param symbol Symbol string (e.g., 'EURUSD')
    * @param volume Lot size
    * @param price Current market price (Mid price or specific Bid/Ask depending on execution)

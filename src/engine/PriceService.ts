@@ -30,8 +30,8 @@ export class PriceService {
     const ask = rawPrice + spreadValue;
 
     return {
-      bid: parseFloat(bid.toFixed(digits)),
-      ask: parseFloat(ask.toFixed(digits)),
+      bid: parseFloat(bid.toFixed(6)),
+      ask: parseFloat(ask.toFixed(6)),
       spread: spreadPips
     };
   }

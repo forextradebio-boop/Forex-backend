@@ -28,12 +28,17 @@ export class ProfitCalculator {
     const spec = SymbolSpecification.getSync(symbol);
     const contractSize = spec.contractSize || 100000;
 
+    const tickSize = spec.tickSize || Math.pow(10, -(spec.digits || 5));
+    const tickValue = spec.tickValue || (tickSize * contractSize);
+
     let rawProfit = 0;
     
+    // MT5 Formula: Profit = (PriceDifferenceInPoints) * TickValue * (Volume / TickSizeMultiplier)
+    // Simplified mathematically as: (PriceDifference / TickSize) * TickValue * Volume
     if (side === 'BUY') {
-      rawProfit = (currentBid - entryPrice) * contractSize * volume;
+      rawProfit = ((currentBid - entryPrice) / tickSize) * tickValue * volume;
     } else {
-      rawProfit = (entryPrice - currentAsk) * contractSize * volume;
+      rawProfit = ((entryPrice - currentAsk) / tickSize) * tickValue * volume;
     }
 
     // Apply USD conversion if the quote currency requires it
