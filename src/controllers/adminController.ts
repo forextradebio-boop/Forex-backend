@@ -12,6 +12,7 @@ import { SymbolModel } from '../models/Symbol';
 import { NewsModel } from '../models/News';
 import bcrypt from 'bcryptjs';
 import { MarginEngine } from '../services/marginEngine';
+import { SocketServer } from '../services/socketServer';
 
 const logAdminAction = async (adminId: any, action: string, details: any) => {
   await AuditLogModel.create({ adminId, action, details });
@@ -171,9 +172,11 @@ export const adminWalletControl = async (req: Request, res: Response) => {
     if (action === 'CREDIT') {
       wallet.balance += amount;
       await TransactionModel.create({ userId, type: 'ADMIN_ADJUSTMENT', amount, balanceAfter: wallet.balance, description: 'Admin Credit' });
+      SocketServer.broadcastTransactionUpdate(userId);
     } else if (action === 'DEBIT') {
       wallet.balance -= amount;
       await TransactionModel.create({ userId, type: 'ADMIN_ADJUSTMENT', amount: -amount, balanceAfter: wallet.balance, description: 'Admin Debit' });
+      SocketServer.broadcastTransactionUpdate(userId);
     } else if (action === 'FREEZE') {
       wallet.status = 'FROZEN';
     } else if (action === 'UNFREEZE') {
@@ -385,11 +388,11 @@ export const forceCloseTrade = async (req: Request, res: Response) => {
     
     const sym = await SymbolModel.findOne({ symbol: position.symbol.toUpperCase() });
     
-    position.pnl = ProfitCalculator.calculate(
+    position.pnl = TradeUtils.calculatePnl(
       position.type,
       position.openPrice,
-      position.closePrice,
-      position.closePrice,
+      position.type === 'BUY' ? position.closePrice : quote.bid, // bid is needed, wait TradeUtils wants currentBid and currentAsk
+      position.type === 'SELL' ? position.closePrice : quote.ask, // ask is needed
       position.volume,
       position.symbol
     );

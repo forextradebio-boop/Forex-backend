@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { DepositModel } from '../models/Deposit';
 import { TransactionModel } from '../models/Transaction';
+import { SocketServer } from '../services/socketServer';
 
 export const createDeposit = async (req: Request, res: Response) => {
   try {
@@ -35,9 +36,11 @@ export const createDeposit = async (req: Request, res: Response) => {
       type: 'DEPOSIT',
       amount,
       status: 'PENDING',
-      referenceId: deposit._id.toString(),
+      referenceId: (deposit as any)._id.toString(),
       description: `Deposit request of ${currency} ${amount} via ${paymentMethod} UTR ${utr}`
     });
+    
+    SocketServer.broadcastTransactionUpdate(userId.toString());
     
     res.status(201).json(deposit);
   } catch (error: any) {

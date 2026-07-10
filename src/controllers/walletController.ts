@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import { WalletModel } from '../models/Wallet';
+import { TransactionModel } from '../models/Transaction';
+import { SocketServer } from '../services/socketServer';
 
 export const getWallet = async (req: Request, res: Response) => {
   try {
@@ -34,6 +36,17 @@ export const fundWallet = async (req: Request, res: Response) => {
       wallet.equity += amount;
       await wallet.save();
     }
+    
+    await TransactionModel.create({
+      userId,
+      type: 'DEPOSIT',
+      amount,
+      balanceAfter: wallet.balance,
+      status: 'APPROVED',
+      description: 'Instant Funding (Testing)'
+    });
+    
+    SocketServer.broadcastTransactionUpdate(userId.toString());
     
     res.json(wallet);
   } catch (error: any) {

@@ -5,6 +5,7 @@ import { WalletModel } from '../models/Wallet';
 import { TransactionModel } from '../models/Transaction';
 import { AuditLogModel } from '../models/AuditLog';
 import { NotificationModel } from '../models/Notification';
+import { SocketServer } from '../services/socketServer';
 
 export const getAllDeposits = async (req: Request, res: Response) => {
   try {
@@ -67,7 +68,7 @@ export const approveDeposit = async (req: Request, res: Response) => {
         amount: deposit.amount,
         balanceAfter: wallet.balance,
         status: 'APPROVED',
-        referenceId: deposit._id.toString(),
+        referenceId: (deposit as any)._id.toString(),
         description: 'Deposit Approved by Admin'
       }], { session });
     }
@@ -77,6 +78,9 @@ export const approveDeposit = async (req: Request, res: Response) => {
 
     await session.commitTransaction();
     session.endSession();
+    
+    // Broadcast transaction event to update UI
+    SocketServer.broadcastTransactionUpdate(deposit.userId.toString());
 
     res.json({ success: true, message: 'Deposit approved successfully', deposit });
   } catch (error: any) {
