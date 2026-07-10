@@ -227,20 +227,33 @@ var init_marketProvider = __esm({
         return true;
       }
       static mapTimeframe(timeframe) {
-        switch (timeframe) {
-          case "M1":
+        switch (timeframe.toLowerCase()) {
+          case "m1":
+          case "1m":
             return { interval: "1m", range: "7d" };
-          case "M5":
+          case "m5":
+          case "5m":
             return { interval: "5m", range: "1mo" };
-          case "M15":
+          case "m15":
+          case "15m":
             return { interval: "15m", range: "1mo" };
-          case "M30":
+          case "m30":
+          case "30m":
             return { interval: "30m", range: "1mo" };
-          case "H1":
+          case "h1":
+          case "1h":
             return { interval: "60m", range: "3mo" };
-          case "H4":
-            return { interval: "240m", range: "6mo" };
-          case "D1":
+          case "h4":
+          case "4h":
+            return { interval: "60m", range: "3mo" };
+          // Yahoo fallback for 4h
+          case "d1":
+          case "1d":
+            return { interval: "1d", range: "1y" };
+          case "1wk":
+            return { interval: "1wk", range: "5y" };
+          case "1mo":
+            return { interval: "1mo", range: "10y" };
           default:
             return { interval: "1d", range: "1y" };
         }
@@ -1244,7 +1257,8 @@ var PositionManager = class {
       spec.leverageLimit || 100,
       usdRate
     );
-    return { pnl, marginUsed };
+    const currentPrice = side === "BUY" ? prices.bid : prices.ask;
+    return { pnl, marginUsed, currentPrice };
   }
   /**
    * Calculates proportional realized PnL and remaining volume for a partial close.
@@ -1360,9 +1374,10 @@ var TradingEngine = class {
     let usedMargin = 0;
     let totalPnl = 0;
     for (const pos of positions) {
-      const { pnl, marginUsed } = PositionManager.evaluateLivePosition(pos, allPrices);
+      const { pnl, marginUsed, currentPrice } = PositionManager.evaluateLivePosition(pos, allPrices);
       pos.pnl = pnl;
       pos.marginUsed = marginUsed;
+      pos.currentPrice = currentPrice;
       usedMargin += marginUsed;
       totalPnl += pnl;
     }
@@ -1409,8 +1424,7 @@ var MarginEngine = class {
         await Promise.resolve().then(() => (init_Position(), Position_exports)).then(({ PositionModel: PositionModel2 }) => {
           PositionModel2.updateOne(
             { _id: pos._id, status: "OPEN" },
-            { $set: { pnl: pos.pnl, marginUsed: pos.marginUsed } }
-            // Note: we can optionally update currentPrice if we track it elsewhere, but Engine relies on live feeds.
+            { $set: { pnl: pos.pnl, marginUsed: pos.marginUsed, currentPrice: pos.currentPrice } }
           ).exec();
         });
       }
