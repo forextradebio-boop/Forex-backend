@@ -25,9 +25,10 @@ export class TradingEngine {
     let totalPnl = 0;
 
     for (const pos of positions) {
-      const { pnl, marginUsed } = PositionManager.evaluateLivePosition(pos, allPrices);
+      const { pnl, marginUsed, currentPrice } = PositionManager.evaluateLivePosition(pos, allPrices);
       pos.pnl = pnl;
       pos.marginUsed = marginUsed;
+      pos.currentPrice = currentPrice;
       
       usedMargin += marginUsed;
       totalPnl += pnl;

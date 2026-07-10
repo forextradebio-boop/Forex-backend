@@ -10,7 +10,7 @@ export class PositionManager {
   static evaluateLivePosition(
     position: any, 
     allPrices: Record<string, any> = {}
-  ): { pnl: number; marginUsed: number } {
+  ): { pnl: number; marginUsed: number; currentPrice: number } {
     const spec = SymbolSpecification.getSync(position.symbol);
     const prices = PriceService.getLivePrices(position.symbol, spec.spread || 1, spec.digits || 5);
     
@@ -62,7 +62,9 @@ export class PositionManager {
       usdRate
     );
 
-    return { pnl, marginUsed };
+    const currentPrice = side === 'BUY' ? prices.bid : prices.ask;
+
+    return { pnl, marginUsed, currentPrice };
   }
 
   /**
