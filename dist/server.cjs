@@ -99,14 +99,18 @@ var init_rapidApiClient = __esm({
           throw new Error("RapidAPI Key is not configured in .env");
         }
         const factory = import_axios.default.create;
+        const isPublicYahoo = apiHost === "query1.finance.yahoo.com";
+        const headers = {
+          "Content-Type": "application/json"
+        };
+        if (!isPublicYahoo) {
+          headers["x-rapidapi-host"] = apiHost;
+          headers["x-rapidapi-key"] = apiKey;
+        }
         const createdClient = factory ? factory({
           baseURL: this.baseUrl,
           timeout: 1e4,
-          headers: {
-            "x-rapidapi-host": apiHost,
-            "x-rapidapi-key": apiKey,
-            "Content-Type": "application/json"
-          }
+          headers
         }) : void 0;
         this.client = createdClient ?? import_axios.default;
       }
@@ -222,7 +226,7 @@ var init_marketProvider = __esm({
         const low = Number(candle?.low);
         const close = Number(candle?.close);
         if (!Number.isFinite(time) || time <= 0) return false;
-        if ([open, high, low, close].some((value) => !Number.isFinite(value) || value === null || value === void 0)) return false;
+        if ([open, high, low, close].some((value) => !Number.isFinite(value) || value <= 0)) return false;
         if (high < low || high < open || high < close || low > open || low > close) return false;
         return true;
       }
@@ -985,6 +989,11 @@ var SocketServer = class {
       this.io.to(userId).emit("wallet", wallet);
     }
   }
+  static broadcastTransactionUpdate(userId) {
+    if (this.io) {
+      this.io.to(userId).emit("transaction");
+    }
+  }
 };
 
 // src/services/priceEngine.ts
@@ -1121,7 +1130,7 @@ var OrderModel = import_mongoose8.default.model("Order", OrderSchema);
 init_Wallet();
 
 // src/engine/ProfitCalculator.ts
-var ProfitCalculator2 = class {
+var ProfitCalculator = class {
   /**
    * Calculates floating or realized profit strictly matching MT5 standards.
    * 
@@ -1240,7 +1249,7 @@ var PositionManager = class {
     const entryPrice = Number(position.openPrice) || 0;
     const volume = Number(position.volume) || 0;
     const side = position.type || "BUY";
-    const pnl = ProfitCalculator2.calculate(
+    const pnl = ProfitCalculator.calculate(
       side,
       entryPrice,
       prices.bid,
@@ -1512,7 +1521,7 @@ var StopLossEngine = class {
         }
       }
       if (shouldClose) {
-        const pnl = ProfitCalculator2.calculate(
+        const pnl = ProfitCalculator.calculate(
           pos.type,
           pos.openPrice,
           closePrice,
@@ -1563,7 +1572,7 @@ var StopOutEngine = class {
         const closePrice = worstPosition.type === "BUY" ? quote.bid : quote.ask;
         const sym = await SymbolModel.findOne({ symbol: worstPosition.symbol.toUpperCase() });
         const contractSize = sym ? sym.contractSize : 1e5;
-        const finalPnl = ProfitCalculator2.calculate(
+        const finalPnl = ProfitCalculator.calculate(
           worstPosition.type,
           worstPosition.openPrice,
           closePrice,
@@ -1800,6 +1809,24 @@ var import_express3 = require("express");
 
 // src/controllers/walletController.ts
 init_Wallet();
+
+// src/models/Transaction.ts
+var import_mongoose11 = __toESM(require("mongoose"), 1);
+var TransactionSchema = new import_mongoose11.Schema(
+  {
+    userId: { type: import_mongoose11.Schema.Types.ObjectId, required: true, ref: "User" },
+    type: { type: String, enum: ["DEPOSIT", "WITHDRAW", "TRADE", "BONUS", "TRADE_LOSS", "ADMIN_ADJUSTMENT", "WITHDRAWAL"], required: true },
+    amount: { type: Number, required: true },
+    balanceAfter: { type: Number },
+    status: { type: String, enum: ["PENDING", "APPROVED", "REJECTED"], default: "PENDING" },
+    referenceId: { type: String },
+    description: { type: String }
+  },
+  { timestamps: true }
+);
+var TransactionModel = import_mongoose11.default.model("Transaction", TransactionSchema);
+
+// src/controllers/walletController.ts
 var getWallet = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -1828,6 +1855,15 @@ var fundWallet = async (req, res) => {
       wallet.equity += amount;
       await wallet.save();
     }
+    await TransactionModel.create({
+      userId,
+      type: "DEPOSIT",
+      amount,
+      balanceAfter: wallet.balance,
+      status: "APPROVED",
+      description: "Instant Funding (Testing)"
+    });
+    SocketServer.broadcastTransactionUpdate(userId.toString());
     res.json(wallet);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1845,10 +1881,10 @@ var walletRoutes_default = router3;
 var import_express4 = require("express");
 
 // src/models/Deposit.ts
-var import_mongoose11 = __toESM(require("mongoose"), 1);
-var DepositSchema = new import_mongoose11.Schema(
+var import_mongoose12 = __toESM(require("mongoose"), 1);
+var DepositSchema = new import_mongoose12.Schema(
   {
-    userId: { type: import_mongoose11.Schema.Types.ObjectId, required: true, ref: "User" },
+    userId: { type: import_mongoose12.Schema.Types.ObjectId, required: true, ref: "User" },
     amount: { type: Number, required: true },
     currency: { type: String, required: true, default: "USD" },
     paymentMethod: { type: String, enum: ["UPI", "NETBANKING"], required: true, default: "UPI" },
@@ -1859,23 +1895,7 @@ var DepositSchema = new import_mongoose11.Schema(
   },
   { timestamps: true }
 );
-var DepositModel = import_mongoose11.default.model("Deposit", DepositSchema);
-
-// src/models/Transaction.ts
-var import_mongoose12 = __toESM(require("mongoose"), 1);
-var TransactionSchema = new import_mongoose12.Schema(
-  {
-    userId: { type: import_mongoose12.Schema.Types.ObjectId, required: true, ref: "User" },
-    type: { type: String, enum: ["DEPOSIT", "WITHDRAW", "TRADE", "BONUS", "TRADE_LOSS", "ADMIN_ADJUSTMENT", "WITHDRAWAL"], required: true },
-    amount: { type: Number, required: true },
-    balanceAfter: { type: Number },
-    status: { type: String, enum: ["PENDING", "APPROVED", "REJECTED"], default: "PENDING" },
-    referenceId: { type: String },
-    description: { type: String }
-  },
-  { timestamps: true }
-);
-var TransactionModel = import_mongoose12.default.model("Transaction", TransactionSchema);
+var DepositModel = import_mongoose12.default.model("Deposit", DepositSchema);
 
 // src/controllers/depositController.ts
 var createDeposit = async (req, res) => {
@@ -1911,6 +1931,7 @@ var createDeposit = async (req, res) => {
       referenceId: deposit._id.toString(),
       description: `Deposit request of ${currency} ${amount} via ${paymentMethod} UTR ${utr}`
     });
+    SocketServer.broadcastTransactionUpdate(userId.toString());
     res.status(201).json(deposit);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -2385,7 +2406,7 @@ var closePosition = async (req, res) => {
     }
     position.status = "CLOSED";
     position.closePrice = closePrice;
-    position.pnl = ProfitCalculator2.calculate(
+    position.pnl = ProfitCalculator.calculate(
       position.type,
       position.openPrice,
       closePrice,
@@ -2501,7 +2522,7 @@ var partialClosePosition = async (req, res) => {
     if (!closePrice) {
       closePrice = PriceService.getExecutionPrice(position.symbol, position.type === "BUY" ? "SELL" : "BUY", spec.spread, spec.digits);
     }
-    const fullPnl = ProfitCalculator2.calculate(
+    const fullPnl = ProfitCalculator.calculate(
       position.type,
       position.openPrice,
       closePrice,
@@ -2918,9 +2939,11 @@ var adminWalletControl = async (req, res) => {
     if (action === "CREDIT") {
       wallet.balance += amount;
       await TransactionModel.create({ userId, type: "ADMIN_ADJUSTMENT", amount, balanceAfter: wallet.balance, description: "Admin Credit" });
+      SocketServer.broadcastTransactionUpdate(userId);
     } else if (action === "DEBIT") {
       wallet.balance -= amount;
       await TransactionModel.create({ userId, type: "ADMIN_ADJUSTMENT", amount: -amount, balanceAfter: wallet.balance, description: "Admin Debit" });
+      SocketServer.broadcastTransactionUpdate(userId);
     } else if (action === "FREEZE") {
       wallet.status = "FROZEN";
     } else if (action === "UNFREEZE") {
@@ -3100,11 +3123,13 @@ var forceCloseTrade = async (req, res) => {
     position.status = "CLOSED";
     position.closePrice = position.type === "BUY" ? quote.bid : quote.ask;
     const sym = await SymbolModel.findOne({ symbol: position.symbol.toUpperCase() });
-    position.pnl = ProfitCalculator.calculate(
+    position.pnl = TradeUtils2.calculatePnl(
       position.type,
       position.openPrice,
-      position.closePrice,
-      position.closePrice,
+      position.type === "BUY" ? position.closePrice : quote.bid,
+      // bid is needed, wait TradeUtils wants currentBid and currentAsk
+      position.type === "SELL" ? position.closePrice : quote.ask,
+      // ask is needed
       position.volume,
       position.symbol
     );
@@ -3188,6 +3213,7 @@ var approveDeposit = async (req, res) => {
     await NotificationModel.create([{ userId: deposit.userId, title: "Deposit Approved", message: "Your deposit has been approved.", type: "SUCCESS" }], { session });
     await session.commitTransaction();
     session.endSession();
+    SocketServer.broadcastTransactionUpdate(deposit.userId.toString());
     res.json({ success: true, message: "Deposit approved successfully", deposit });
   } catch (error) {
     await session.abortTransaction();
