@@ -67,4 +67,10 @@ export class SocketServer {
       this.io.to(userId).emit('wallet', wallet);
     }
   }
+
+  static broadcastTransactionUpdate(userId: string) {
+    if (this.io) {
+      this.io.to(userId).emit('transaction');
+    }
+  }
 }

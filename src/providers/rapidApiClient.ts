@@ -20,14 +20,21 @@ export class RapidApiClient {
     }
 
     const factory = (axios as typeof axios & { create?: (config: AxiosRequestConfig) => AxiosInstance }).create;
+    
+    const isPublicYahoo = apiHost === 'query1.finance.yahoo.com';
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    
+    if (!isPublicYahoo) {
+      headers['x-rapidapi-host'] = apiHost;
+      headers['x-rapidapi-key'] = apiKey;
+    }
+
     const createdClient = factory ? factory({
       baseURL: this.baseUrl,
       timeout: 10000,
-      headers: {
-        'x-rapidapi-host': apiHost,
-        'x-rapidapi-key': apiKey,
-        'Content-Type': 'application/json',
-      },
+      headers,
     }) : undefined;
 
     this.client = createdClient ?? axios;

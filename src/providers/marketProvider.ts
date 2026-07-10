@@ -43,7 +43,7 @@ export class MarketProvider {
     const close = Number(candle?.close);
 
     if (!Number.isFinite(time) || time <= 0) return false;
-    if ([open, high, low, close].some((value) => !Number.isFinite(value) || value === null || value === undefined)) return false;
+    if ([open, high, low, close].some((value) => !Number.isFinite(value) || value <= 0)) return false;
     if (high < low || high < open || high < close || low > open || low > close) return false;
 
     return true;
