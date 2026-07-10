@@ -18,7 +18,7 @@ export class MarginEngine {
         await import('../models/Position').then(({ PositionModel }) => {
           PositionModel.updateOne(
             { _id: pos._id, status: 'OPEN' }, 
-            { $set: { pnl: pos.pnl, marginUsed: pos.marginUsed } } // Note: we can optionally update currentPrice if we track it elsewhere, but Engine relies on live feeds.
+            { $set: { pnl: pos.pnl, marginUsed: pos.marginUsed, currentPrice: pos.currentPrice } }
           ).exec();
         });
       }
