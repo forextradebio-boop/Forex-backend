@@ -96,6 +96,10 @@ export class SymbolSpecification {
       contractSize = 100000;
       digits = 3;
       leverageLimit = 500;
+    } else if (sym === 'USOIL') {
+      contractSize = 100;
+      digits = 2;
+      leverageLimit = 200;
     }
 
     const tickSize = Math.pow(10, -digits);

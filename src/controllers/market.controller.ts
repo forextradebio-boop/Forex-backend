@@ -132,3 +132,47 @@ export const getQuote = async (req: Request, res: Response) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+export const getCrudeOil = async (req: Request, res: Response) => {
+  try {
+    // Fetch crude oil data - CL=F is the Crude Oil (WTI) symbol
+    const quote = await MarketService.getQuote('CL=F');
+    if (!quote) {
+      return res.status(404).json({ error: 'Crude oil data not found' });
+    }
+    res.json(quote);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const getCrudeOilChart = async (req: Request, res: Response) => {
+  try {
+    const symbol = (req.query.symbol as string) || 'CL=F';
+    const interval = (req.query.interval as string) || '1d';
+    const range = (req.query.range as string) || 'ytd';
+    
+    // Call external API to get crude oil chart data
+    const response = await fetch(
+      `https://live-stock-market.p.rapidapi.com/v1/index/chart?symbol=${symbol}&interval=${interval}&range=${range}`,
+      {
+        method: 'GET',
+        headers: {
+          'X-RapidAPI-Key': process.env.RAPIDAPI_KEY || '',
+          'X-RapidAPI-Host': 'live-stock-market.p.rapidapi.com'
+        }
+      }
+    );
+
+    if (!response.ok) {
+      return res.status(response.status).json({ 
+        error: `External API returned ${response.status}` 
+      });
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
