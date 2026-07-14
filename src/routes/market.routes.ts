@@ -11,7 +11,9 @@ import {
   getSearch,
   getQuote,
   getWatch,
-  getSymbolDetail
+  getSymbolDetail,
+  getCrudeOil,
+  getCrudeOilChart
 } from '../controllers/market.controller';
 
 const router = express.Router();
@@ -29,5 +31,9 @@ router.get('/crypto', getCrypto);
 router.get('/stocks', getStocks);
 router.get('/search', getSearch);
 router.get('/quote', getQuote);
+
+// Crude Oil
+router.get('/crude-oil', getCrudeOil);
+router.get('/crude-oil-chart', getCrudeOilChart);
 
 export default router;
