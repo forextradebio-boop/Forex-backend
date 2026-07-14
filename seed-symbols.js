@@ -10,7 +10,7 @@ const SymbolModel = mongoose.model('Symbol', SymbolSchema);
 
 const defaultSymbols = [
   'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'NZDUSD',
-  'EURJPY', 'EURGBP', 'GBPJPY', 'XAUUSD', 'XAGUSD', 'BTCUSD', 'ETHUSD'
+  'EURJPY', 'EURGBP', 'GBPJPY', 'XAUUSD', 'XAGUSD', 'BTCUSD', 'ETHUSD', 'USOIL'
 ];
 
 async function seedSymbols() {
