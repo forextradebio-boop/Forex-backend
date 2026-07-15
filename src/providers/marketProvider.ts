@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { RapidApiClient } from './rapidApiClient';
 import { SymbolMapper } from './symbolMapper';
 
@@ -95,7 +96,7 @@ export class MarketProvider {
     const high = Number(meta?.regularMarketDayHigh ?? quote?.high?.slice(-1)?.[0] ?? price);
     const low = Number(meta?.regularMarketDayLow ?? quote?.low?.slice(-1)?.[0] ?? price);
     const open = Number(meta?.regularMarketOpen ?? quote?.open?.slice(-1)?.[0] ?? price);
-    const volume = Number(quote?.volume?.slice(-1)?.[0] ?? 0);
+    const volume = Number(meta?.regularMarketVolume ?? quote?.volume?.slice(-1)?.[0] ?? 0);
 
     const parsedObject = {
       symbol: normalized,
@@ -114,15 +115,6 @@ export class MarketProvider {
       volume: Number.isFinite(volume) ? volume : 0,
       timestamp: Date.now(),
     };
-
-    if (normalized === 'XAUUSD' || normalized === 'XAGUSD') {
-      console.log(`\n====================================================`);
-      console.log(`--- RAW JSON FROM YAHOO FINANCE (${rapidApiSymbol}) ---`);
-      console.log(JSON.stringify(meta, null, 2));
-      console.log(`\n--- PARSED OBJECT (${normalized}) ---`);
-      console.log(JSON.stringify(parsedObject, null, 2));
-      console.log(`====================================================\n`);
-    }
 
     return parsedObject;
   }
@@ -160,6 +152,40 @@ export class MarketProvider {
     }
 
     return candles;
+  }
+
+  public static async fetchMovers(params: { exchange?: string; name?: string; locale?: string }) {
+    const exchange = params.exchange || 'US';
+    const name = params.name || 'volume_gainers';
+    const locale = params.locale || 'en';
+    const rapidApiKey = process.env.RAPIDAPI_KEY || process.env.RAPID_API_KEY;
+
+    if (!rapidApiKey) {
+      throw new Error('RapidAPI Key is not configured in .env');
+    }
+
+    const response = await axios.get('https://trading-view.p.rapidapi.com/market/get-movers', {
+      params: { exchange, name, locale },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-rapidapi-host': 'trading-view.p.rapidapi.com',
+        'x-rapidapi-key': rapidApiKey,
+      },
+      timeout: 10000,
+    });
+
+    const payload = response.data;
+    const symbols = Array.isArray(payload?.symbols) ? payload.symbols : [];
+
+    return {
+      totalCount: Number(payload?.totalCount ?? symbols.length),
+      fields: Array.isArray(payload?.fields) ? payload.fields : [],
+      symbols: symbols.map((item: any) => ({
+        s: item?.s,
+        f: Array.isArray(item?.f) ? item.f : [],
+      })),
+      time: payload?.time,
+    };
   }
 
   public static getCategory(symbol: string): string {
