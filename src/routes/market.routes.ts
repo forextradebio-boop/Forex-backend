@@ -5,6 +5,7 @@ import {
   getTickerBySymbol, 
   getQuotes, 
   getChart,
+  getMovers,
   getForex,
   getCrypto,
   getStocks,
@@ -24,6 +25,7 @@ router.get('/watch', getWatch);
 router.get('/symbol/:symbol', getSymbolDetail);
 router.get('/quotes/:symbol', getQuotes);
 router.get('/chart/:symbol', getChart);
+router.get('/get-movers', getMovers);
 
 // Market categories
 router.get('/forex', getForex);
