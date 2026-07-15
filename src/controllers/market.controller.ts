@@ -77,6 +77,19 @@ export const getChart = async (req: Request, res: Response) => {
   }
 };
 
+export const getMovers = async (req: Request, res: Response) => {
+  try {
+    const exchange = (req.query.exchange as string) || 'US';
+    const name = (req.query.name as string) || 'volume_gainers';
+    const locale = (req.query.locale as string) || 'en';
+
+    const movers = await MarketService.getMovers({ exchange, name, locale });
+    res.json(movers);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 export const getForex = async (req: Request, res: Response) => {
   try {
     const quotes = await MarketService.getSymbolsByCategory('FOREX');
