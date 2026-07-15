@@ -137,5 +137,8 @@ export class MarketService {
     const symbols = allSymbols.filter((sym) => sym.includes(queryUpper));
     return Object.values(await this.getQuotes(symbols));
   }
-}
 
+  static async getMovers(params: { exchange?: string; name?: string; locale?: string }) {
+    return MarketProvider.fetchMovers(params);
+  }
+}
