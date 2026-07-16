@@ -101,7 +101,8 @@ var init_rapidApiClient = __esm({
         const factory = import_axios.default.create;
         const isPublicYahoo = apiHost === "query1.finance.yahoo.com";
         const headers = {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
         };
         if (!isPublicYahoo) {
           headers["x-rapidapi-host"] = apiHost;
@@ -208,10 +209,11 @@ var init_symbolMapper = __esm({
 });
 
 // src/providers/marketProvider.ts
-var MarketProvider;
+var import_axios2, MarketProvider;
 var init_marketProvider = __esm({
   "src/providers/marketProvider.ts"() {
     "use strict";
+    import_axios2 = __toESM(require("axios"), 1);
     init_rapidApiClient();
     init_symbolMapper();
     MarketProvider = class {
@@ -230,42 +232,45 @@ var init_marketProvider = __esm({
         if (high < low || high < open || high < close || low > open || low > close) return false;
         return true;
       }
+      static getDigitsForSymbol(symbol) {
+        return null;
+      }
       static mapTimeframe(timeframe) {
         switch (timeframe.toLowerCase()) {
           case "m1":
           case "1m":
-            return { interval: "1m", range: "7d" };
+            return { interval: "1m", range: "7d", seconds: 60 };
           case "m5":
           case "5m":
-            return { interval: "5m", range: "1mo" };
+            return { interval: "5m", range: "1mo", seconds: 300 };
           case "m15":
           case "15m":
-            return { interval: "15m", range: "1mo" };
+            return { interval: "15m", range: "1mo", seconds: 900 };
           case "m30":
           case "30m":
-            return { interval: "30m", range: "1mo" };
+            return { interval: "30m", range: "1mo", seconds: 1800 };
           case "h1":
           case "1h":
-            return { interval: "60m", range: "3mo" };
+            return { interval: "60m", range: "3mo", seconds: 3600 };
           case "h4":
           case "4h":
-            return { interval: "60m", range: "3mo" };
+            return { interval: "60m", range: "3mo", seconds: 14400 };
           // Yahoo fallback for 4h
           case "d1":
           case "1d":
-            return { interval: "1d", range: "1y" };
+            return { interval: "1d", range: "1y", seconds: 86400 };
           case "1wk":
-            return { interval: "1wk", range: "5y" };
+            return { interval: "1wk", range: "5y", seconds: 604800 };
           case "1mo":
-            return { interval: "1mo", range: "10y" };
+            return { interval: "1mo", range: "10y", seconds: 2592e3 };
           default:
-            return { interval: "1d", range: "1y" };
+            return { interval: "1d", range: "1y", seconds: 86400 };
         }
       }
       static async fetchQuote(symbol) {
         const normalized = this.normalizeSymbol(symbol);
         const rapidApiSymbol = SymbolMapper.getProviderSymbol(normalized);
-        const data = await this.client.get(`/v8/finance/chart/${encodeURIComponent(rapidApiSymbol)}`, {
+        const data = await this.client.get(`/v8/finance/chart/${rapidApiSymbol}`, {
           params: { interval: "1m", range: "1d" }
         });
         const chartResult = data?.chart?.result?.[0];
@@ -282,7 +287,7 @@ var init_marketProvider = __esm({
         const high = Number(meta?.regularMarketDayHigh ?? quote?.high?.slice(-1)?.[0] ?? price);
         const low = Number(meta?.regularMarketDayLow ?? quote?.low?.slice(-1)?.[0] ?? price);
         const open = Number(meta?.regularMarketOpen ?? quote?.open?.slice(-1)?.[0] ?? price);
-        const volume = Number(quote?.volume?.slice(-1)?.[0] ?? 0);
+        const volume = Number(meta?.regularMarketVolume ?? quote?.volume?.slice(-1)?.[0] ?? 0);
         const parsedObject = {
           symbol: normalized,
           price,
@@ -300,43 +305,191 @@ var init_marketProvider = __esm({
           volume: Number.isFinite(volume) ? volume : 0,
           timestamp: Date.now()
         };
-        if (normalized === "XAUUSD" || normalized === "XAGUSD") {
-          console.log(`
-====================================================`);
-          console.log(`--- RAW JSON FROM YAHOO FINANCE (${rapidApiSymbol}) ---`);
-          console.log(JSON.stringify(meta, null, 2));
-          console.log(`
---- PARSED OBJECT (${normalized}) ---`);
-          console.log(JSON.stringify(parsedObject, null, 2));
-          console.log(`====================================================
-`);
-        }
         return parsedObject;
       }
       static async fetchHistoricalCandles(symbol, timeframe = "D1") {
+        const startTime = Date.now();
         const normalized = this.normalizeSymbol(symbol);
         const rapidApiSymbol = SymbolMapper.getProviderSymbol(normalized);
-        const { interval, range } = this.mapTimeframe(timeframe);
-        const data = await this.client.get(`/v8/finance/chart/${encodeURIComponent(rapidApiSymbol)}`, {
-          params: { interval, range }
-        });
-        const chartResult = data?.chart?.result?.[0];
-        const quote = chartResult?.indicators?.quote?.[0];
-        if (!Array.isArray(chartResult?.timestamp) || !quote) {
-          throw new Error("Invalid RapidAPI candle response");
+        const { interval, range, seconds } = this.mapTimeframe(timeframe);
+        const apiPath = `/v8/finance/chart/${rapidApiSymbol}`;
+        let candles = [];
+        let lastError = null;
+        let providerResponseCount = 0;
+        let rejectedCount = 0;
+        const aggregateAndNormalize = (chartResult, quote) => {
+          const digits = this.getDigitsForSymbol(normalized);
+          const factor = digits !== null ? Math.pow(10, digits) : 1;
+          const uniqueCandlesMap = /* @__PURE__ */ new Map();
+          providerResponseCount = chartResult.timestamp.length;
+          chartResult.timestamp.forEach((time, index) => {
+            let o = Number(quote.open?.[index]);
+            let h = Number(quote.high?.[index]);
+            let l = Number(quote.low?.[index]);
+            let c = Number(quote.close?.[index]);
+            let v = Number(quote.volume?.[index] ?? 0);
+            if (!Number.isFinite(time) || time <= 0) {
+              rejectedCount++;
+              return;
+            }
+            if (!Number.isFinite(o) || !Number.isFinite(h) || !Number.isFinite(l) || !Number.isFinite(c)) {
+              rejectedCount++;
+              return;
+            }
+            if (o <= 0 || h <= 0 || l <= 0 || c <= 0) {
+              rejectedCount++;
+              return;
+            }
+            const trueHigh = Math.max(o, h, l, c);
+            const trueLow = Math.min(o, h, l, c);
+            h = trueHigh;
+            l = trueLow;
+            const timeBox = Math.floor(time / seconds) * seconds;
+            const existing = uniqueCandlesMap.get(timeBox);
+            if (existing) {
+              existing.open = existing.open || o;
+              existing.high = Math.max(existing.high, h);
+              existing.low = Math.min(existing.low, l);
+              existing.close = c;
+              existing.volume = (existing.volume || 0) + v;
+            } else {
+              uniqueCandlesMap.set(timeBox, {
+                time: timeBox,
+                open: o,
+                high: h,
+                low: l,
+                close: c,
+                volume: v
+              });
+            }
+          });
+          return Array.from(uniqueCandlesMap.values()).sort((a, b) => a.time - b.time);
+        };
+        const isForex = SymbolMapper.getCategory(normalized) === "FOREX";
+        if (isForex) {
+          try {
+            const twelveDataKey = process.env.TWELVEDATA_API_KEY;
+            if (twelveDataKey) {
+              const tdSymbol = normalized.length === 6 ? `${normalized.substring(0, 3)}/${normalized.substring(3)}` : normalized;
+              const tdInterval = interval === "1m" ? "1min" : interval === "5m" ? "5min" : interval === "15m" ? "15min" : interval === "30m" ? "30min" : interval === "60m" ? "1h" : "1day";
+              const tdUrl = `https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=${tdInterval}&outputsize=5000&timezone=UTC&apikey=${twelveDataKey}`;
+              const tdResponse = await import_axios2.default.get(tdUrl, { timeout: 8e3 });
+              if (tdResponse.data && tdResponse.data.values) {
+                const nowSeconds = Math.floor(Date.now() / 1e3);
+                candles = tdResponse.data.values.map((v) => ({
+                  time: Math.floor((/* @__PURE__ */ new Date(v.datetime + "Z")).getTime() / 1e3),
+                  open: Number(v.open),
+                  high: Number(v.high),
+                  low: Number(v.low),
+                  close: Number(v.close),
+                  volume: 0
+                })).filter((c) => c.time <= nowSeconds).sort((a, b) => a.time - b.time);
+                if (candles.length > 0) {
+                  console.log(`[MarketProvider] TwelveData successfully fetched ${candles.length} candles for ${tdSymbol} (${tdInterval})`);
+                  try {
+                    const liveQuote = await this.fetchQuote(normalized);
+                    if (liveQuote && liveQuote.price > 0) {
+                      const latestClose = candles[candles.length - 1].close;
+                      const offset = liveQuote.price - latestClose;
+                      if (Math.abs(offset) / latestClose < 5e-3) {
+                        candles = candles.map((c) => ({
+                          ...c,
+                          open: Number((c.open + offset).toFixed(5)),
+                          high: Number((c.high + offset).toFixed(5)),
+                          low: Number((c.low + offset).toFixed(5)),
+                          close: Number((c.close + offset).toFixed(5))
+                        }));
+                        console.log(`[MarketProvider] Applied price alignment offset of ${offset} to ${tdSymbol}`);
+                      }
+                    }
+                  } catch (err) {
+                    console.warn(`[MarketProvider] Failed to align prices for ${tdSymbol}:`, err.message);
+                  }
+                  return candles;
+                }
+              }
+            }
+          } catch (error) {
+            console.warn(`[MarketProvider] TwelveData failed for ${normalized}: ${error.message}. Falling back to Yahoo Finance...`);
+          }
         }
-        const candles = chartResult.timestamp.map((time, index) => ({
-          time,
-          open: Number(quote.open?.[index]),
-          high: Number(quote.high?.[index]),
-          low: Number(quote.low?.[index]),
-          close: Number(quote.close?.[index]),
-          volume: Number(quote.volume?.[index] ?? 0)
-        })).filter((candle) => this.isValidCandle(candle)).sort((a, b) => a.time - b.time);
+        try {
+          const data = await this.client.get(apiPath, {
+            params: { interval, range }
+          });
+          const chartResult = data?.chart?.result?.[0];
+          const quote = chartResult?.indicators?.quote?.[0];
+          if (!Array.isArray(chartResult?.timestamp) || !quote) {
+            throw new Error("Invalid RapidAPI candle response");
+          }
+          const nowSeconds = Math.floor(Date.now() / 1e3);
+          candles = aggregateAndNormalize(chartResult, quote).filter((c) => c.time <= nowSeconds);
+          if (candles.length === 0) {
+            throw new Error("Received empty or invalid candles");
+          }
+        } catch (error) {
+          lastError = error;
+          console.warn(`[MarketProvider] Primary provider failed for ${normalized} (${rapidApiSymbol}): ${error.message}. Attempting fallback...`);
+        }
         if (candles.length === 0) {
-          throw new Error("Received empty or invalid candles");
+          try {
+            const fallbackUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${rapidApiSymbol}`;
+            const response = await import_axios2.default.get(fallbackUrl, {
+              params: { interval, range },
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                "Accept": "application/json"
+              },
+              timeout: 8e3
+            });
+            const data = response.data;
+            const chartResult = data?.chart?.result?.[0];
+            const quote = chartResult?.indicators?.quote?.[0];
+            if (Array.isArray(chartResult?.timestamp) && quote) {
+              const nowSeconds = Math.floor(Date.now() / 1e3);
+              candles = aggregateAndNormalize(chartResult, quote).filter((c) => c.time <= nowSeconds);
+            }
+          } catch (error) {
+            lastError = error;
+            console.error(`[MarketProvider] Fallback provider also failed for ${normalized}: ${error.message}`);
+          }
+        }
+        const responseTime = Date.now() - startTime;
+        console.log(`[MarketProvider] Requested Symbol: ${symbol} | Mapped Symbol: ${rapidApiSymbol} | Interval: ${interval} | Provider URL: ${candles.length > 0 && !lastError ? apiPath : "fallback"} | Normalized Count: ${candles.length} | Rejected Count: ${rejectedCount}`);
+        if (candles.length === 0) {
+          console.error(`[MarketProvider] Returning empty array for ${normalized}. Last error:`, lastError?.message || "Unknown");
+          return [];
         }
         return candles;
+      }
+      static async fetchMovers(params) {
+        const exchange = params.exchange || "US";
+        const name = params.name || "volume_gainers";
+        const locale = params.locale || "en";
+        const rapidApiKey = process.env.RAPIDAPI_KEY || process.env.RAPID_API_KEY;
+        if (!rapidApiKey) {
+          throw new Error("RapidAPI Key is not configured in .env");
+        }
+        const response = await import_axios2.default.get("https://trading-view.p.rapidapi.com/market/get-movers", {
+          params: { exchange, name, locale },
+          headers: {
+            "Content-Type": "application/json",
+            "x-rapidapi-host": "trading-view.p.rapidapi.com",
+            "x-rapidapi-key": rapidApiKey
+          },
+          timeout: 1e4
+        });
+        const payload = response.data;
+        const symbols = Array.isArray(payload?.symbols) ? payload.symbols : [];
+        return {
+          totalCount: Number(payload?.totalCount ?? symbols.length),
+          fields: Array.isArray(payload?.fields) ? payload.fields : [],
+          symbols: symbols.map((item) => ({
+            s: item?.s,
+            f: Array.isArray(item?.f) ? item.f : []
+          })),
+          time: payload?.time
+        };
       }
       static getCategory(symbol) {
         return SymbolMapper.getCategory(symbol);
@@ -485,6 +638,9 @@ var init_market_service = __esm({
         const allSymbols = MarketProvider.getAllSymbols();
         const symbols = allSymbols.filter((sym) => sym.includes(queryUpper));
         return Object.values(await this.getQuotes(symbols));
+      }
+      static async getMovers(params) {
+        return MarketProvider.fetchMovers(params);
       }
     };
   }
@@ -1086,6 +1242,10 @@ var SymbolSpecification = class {
       contractSize = 1e5;
       digits = 3;
       leverageLimit = 500;
+    } else if (sym === "USOIL") {
+      contractSize = 100;
+      digits = 2;
+      leverageLimit = 200;
     }
     const tickSize = Math.pow(10, -digits);
     const tickValue = tickSize * contractSize;
@@ -3390,6 +3550,17 @@ var getChart = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+var getMovers = async (req, res) => {
+  try {
+    const exchange = req.query.exchange || "US";
+    const name = req.query.name || "volume_gainers";
+    const locale = req.query.locale || "en";
+    const movers = await MarketService.getMovers({ exchange, name, locale });
+    res.json(movers);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
 var getForex = async (req, res) => {
   try {
     const quotes = await MarketService.getSymbolsByCategory("FOREX");
@@ -3441,6 +3612,43 @@ var getQuote = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+var getCrudeOil = async (req, res) => {
+  try {
+    const quote = await MarketService.getQuote("CL=F");
+    if (!quote) {
+      return res.status(404).json({ error: "Crude oil data not found" });
+    }
+    res.json(quote);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+var getCrudeOilChart = async (req, res) => {
+  try {
+    const symbol = req.query.symbol || "CL=F";
+    const interval = req.query.interval || "1d";
+    const range = req.query.range || "ytd";
+    const response = await fetch(
+      `https://live-stock-market.p.rapidapi.com/v1/index/chart?symbol=${symbol}&interval=${interval}&range=${range}`,
+      {
+        method: "GET",
+        headers: {
+          "X-RapidAPI-Key": process.env.RAPIDAPI_KEY || "",
+          "X-RapidAPI-Host": "live-stock-market.p.rapidapi.com"
+        }
+      }
+    );
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: `External API returned ${response.status}`
+      });
+    }
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
 
 // src/routes/market.routes.ts
 var router13 = import_express13.default.Router();
@@ -3450,18 +3658,21 @@ router13.get("/watch", getWatch);
 router13.get("/symbol/:symbol", getSymbolDetail);
 router13.get("/quotes/:symbol", getQuotes);
 router13.get("/chart/:symbol", getChart);
+router13.get("/get-movers", getMovers);
 router13.get("/forex", getForex);
 router13.get("/crypto", getCrypto);
 router13.get("/stocks", getStocks);
 router13.get("/search", getSearch);
 router13.get("/quote", getQuote);
+router13.get("/crude-oil", getCrudeOil);
+router13.get("/crude-oil-chart", getCrudeOilChart);
 var market_routes_default = router13;
 
 // src/routes/newsRoutes.ts
 var import_express14 = __toESM(require("express"), 1);
 
 // src/services/newsService.ts
-var import_axios2 = __toESM(require("axios"), 1);
+var import_axios3 = __toESM(require("axios"), 1);
 var MARKET_AUX_BASE_URL = "https://api.marketaux.com/v1";
 var CACHE_TTL_MS = 1e3 * 60 * 2;
 var RETRY_ATTEMPTS = 1;
@@ -3489,7 +3700,7 @@ var DEFAULT_FILTER_PARAMS = {
 };
 var NewsService = class {
   static cache = /* @__PURE__ */ new Map();
-  static http = import_axios2.default.create({
+  static http = import_axios3.default.create({
     baseURL: MARKET_AUX_BASE_URL,
     timeout: 1e4
   });
@@ -3725,13 +3936,13 @@ var import_promises = __toESM(require("fs/promises"), 1);
 var import_path3 = __toESM(require("path"), 1);
 
 // src/providers/forexCalendarProvider.ts
-var import_axios3 = __toESM(require("axios"), 1);
+var import_axios4 = __toESM(require("axios"), 1);
 var API_HOST = process.env.RAPID_API_FOREX_CALENDAR_HOST || "forex-calendar.p.rapidapi.com";
 var API_KEY = process.env.RAPIDAPI_KEY;
 if (!API_KEY) {
   throw new Error("RAPIDAPI_KEY is not configured in .env");
 }
-var client = import_axios3.default.create({
+var client = import_axios4.default.create({
   baseURL: `https://${API_HOST}`,
   timeout: 15e3,
   headers: {
