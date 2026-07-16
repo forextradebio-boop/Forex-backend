@@ -24,6 +24,7 @@ const SUPPORTED_SYMBOLS: Record<string, SymbolDefinition> = {
   SPX500: { providerSymbol: '^GSPC', category: 'INDICES', displaySymbol: 'SPX 500' },
   NAS100: { providerSymbol: '^NDX', category: 'INDICES', displaySymbol: 'NAS 100' },
   GER40: { providerSymbol: '^GDAXI', category: 'INDICES', displaySymbol: 'GER 40' },
+  USOIL: { providerSymbol: 'CL=F', category: 'METALS', displaySymbol: 'USOIL' },
 };
 
 export class SymbolMapper {
