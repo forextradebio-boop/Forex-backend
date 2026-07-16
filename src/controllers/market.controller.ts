@@ -165,26 +165,27 @@ export const getCrudeOilChart = async (req: Request, res: Response) => {
     const interval = (req.query.interval as string) || '1d';
     const range = (req.query.range as string) || 'ytd';
     
-    // Call external API to get crude oil chart data
+    // Fetch directly from Yahoo Finance to avoid RapidAPI rate limits/errors
     const response = await fetch(
-      `https://live-stock-market.p.rapidapi.com/v1/index/chart?symbol=${symbol}&interval=${interval}&range=${range}`,
+      `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&range=${range}`,
       {
         method: 'GET',
         headers: {
-          'X-RapidAPI-Key': process.env.CRUDE_OIL_API_KEY || process.env.RAPIDAPI_KEY || '',
-          'X-RapidAPI-Host': 'live-stock-market.p.rapidapi.com'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+          'Accept': 'application/json',
         }
       }
     );
 
     if (!response.ok) {
       return res.status(response.status).json({ 
-        error: `External API returned ${response.status}` 
+        error: `Yahoo Finance API returned ${response.status}` 
       });
     }
 
     const data = await response.json();
-    res.json(data);
+    // The frontend expects the response to be wrapped in { status, data }
+    res.json({ status: 200, data: data });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
