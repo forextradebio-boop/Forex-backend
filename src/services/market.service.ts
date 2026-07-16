@@ -142,3 +142,4 @@ export class MarketService {
     return MarketProvider.fetchMovers(params);
   }
 }
+
