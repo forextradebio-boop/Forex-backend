@@ -171,7 +171,7 @@ export const getCrudeOilChart = async (req: Request, res: Response) => {
       {
         method: 'GET',
         headers: {
-          'X-RapidAPI-Key': process.env.RAPIDAPI_KEY || '',
+          'X-RapidAPI-Key': process.env.CRUDE_OIL_API_KEY || process.env.RAPIDAPI_KEY || '',
           'X-RapidAPI-Host': 'live-stock-market.p.rapidapi.com'
         }
       }
