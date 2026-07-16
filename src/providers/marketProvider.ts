@@ -175,7 +175,6 @@ export class MarketProvider {
         const existing = uniqueCandlesMap.get(timeBox);
 
         if (existing) {
-          existing.open = existing.open || o; // Keep the first tick's open
           existing.high = Math.max(existing.high, h);
           existing.low = Math.min(existing.low, l);
           existing.close = c;
@@ -192,7 +191,20 @@ export class MarketProvider {
         }
       });
 
-      return Array.from(uniqueCandlesMap.values()).sort((a, b) => a.time - b.time);
+      const aggregated = Array.from(uniqueCandlesMap.values()).sort((a, b) => a.time - b.time);
+      
+      // Fix flat candles (where open=high=low=close) from Yahoo Finance by carrying over previous close
+      for (let i = 1; i < aggregated.length; i++) {
+        const prev = aggregated[i - 1];
+        const curr = aggregated[i];
+        if (curr.open === curr.high && curr.open === curr.low && curr.open === curr.close) {
+          curr.open = prev.close;
+          curr.high = Math.max(curr.open, curr.close);
+          curr.low = Math.min(curr.open, curr.close);
+        }
+      }
+
+      return aggregated;
     };
 
     // Use TwelveData for Forex pairs (especially for 1m interval) because Yahoo Finance only provides flat tick snapshots
