@@ -8,6 +8,9 @@ export interface ITransaction extends Document {
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   referenceId?: string;
   description?: string;
+  isDeleted: boolean;
+  deletedAt?: Date;
+  isArchived: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -21,6 +24,9 @@ const TransactionSchema = new Schema<ITransaction>(
     status: { type: String, enum: ['PENDING', 'APPROVED', 'REJECTED'], default: 'PENDING' },
     referenceId: { type: String },
     description: { type: String },
+    isDeleted: { type: Boolean, default: false },
+    deletedAt: { type: Date },
+    isArchived: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

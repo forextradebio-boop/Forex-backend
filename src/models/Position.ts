@@ -15,6 +15,8 @@ export interface IPosition extends Document {
   marginUsed: number;
   status: 'OPEN' | 'CLOSED';
   closePrice?: number;
+  deletedAt?: Date;
+  isArchived: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -35,6 +37,8 @@ const PositionSchema = new Schema<IPosition>(
     marginUsed: { type: Number, default: 0 },
     status: { type: String, enum: ['OPEN', 'CLOSED'], default: 'OPEN' },
     closePrice: { type: Number },
+    deletedAt: { type: Date },
+    isArchived: { type: Boolean, default: false }
   },
   { timestamps: true }
 );

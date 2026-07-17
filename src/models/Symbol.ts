@@ -14,7 +14,9 @@ export interface ISymbol extends Document {
   minLot: number;
   maxLot: number;
   lotStep: number;
-  isActive: boolean;
+  status: 'OPEN' | 'PAUSED' | 'CLOSED' | 'MAINTENANCE';
+  visibleToUsers: boolean;
+  tradingEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -34,7 +36,9 @@ const SymbolSchema = new Schema<ISymbol>(
     minLot: { type: Number, required: true, default: 0.01 },
     maxLot: { type: Number, required: true, default: 100 },
     lotStep: { type: Number, required: true, default: 0.01 },
-    isActive: { type: Boolean, default: true },
+    status: { type: String, enum: ['OPEN', 'PAUSED', 'CLOSED', 'MAINTENANCE'], default: 'OPEN' },
+    visibleToUsers: { type: Boolean, default: true },
+    tradingEnabled: { type: Boolean, default: true },
   },
   { timestamps: true }
 );

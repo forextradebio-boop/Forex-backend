@@ -2,10 +2,6 @@ import { MarketProvider } from '../providers/marketProvider';
 import { SymbolMapper } from '../providers/symbolMapper';
 
 export class MarketService {
-  private static readonly WATCHLIST = [
-    'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'NZDUSD',
-    'EURJPY', 'EURGBP', 'GBPJPY', 'XAUUSD', 'XAGUSD', 'BTCUSD', 'ETHUSD',
-  ];
   private static readonly PRICE_TTL_MS = 250;
   private static readonly CANDLE_TTL_MS = 60000;
   private static readonly priceCache = new Map<string, { value: any; expiresAt: number }>();
@@ -17,12 +13,15 @@ export class MarketService {
     return SymbolMapper.normalizeSymbol(symbol);
   }
 
-  static getWatchSymbols() {
-    return [...this.WATCHLIST];
+  static async getWatchSymbols() {
+    const { SymbolModel } = await import('../models/Symbol');
+    const symbols = await SymbolModel.find({ visibleToUsers: { $ne: false } }).lean();
+    return symbols.map(s => s.symbol);
   }
 
   static async getWatchQuotes() {
-    return Object.values(await this.getQuotes(this.WATCHLIST));
+    const symbols = await this.getWatchSymbols();
+    return Object.values(await this.getQuotes(symbols));
   }
 
   static async getQuote(symbol: string) {

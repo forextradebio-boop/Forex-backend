@@ -20,6 +20,18 @@ import {
 const router = express.Router();
 
 router.get('/tickers', getTickers);
+router.get('/platform-status', async (req, res) => {
+  try {
+    const { MarketSettingsModel } = await import('../models/MarketSettings');
+    let settings = await MarketSettingsModel.findOne();
+    if (!settings) {
+      settings = await MarketSettingsModel.create({});
+    }
+    res.json(settings);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
 router.get('/tickers/:symbol', getTickerBySymbol);
 router.get('/watch', getWatch);
 router.get('/symbol/:symbol', getSymbolDetail);

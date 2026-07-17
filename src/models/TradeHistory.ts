@@ -11,6 +11,7 @@ export interface ITradeHistory extends Document {
   pnl: number;
   openTime: Date;
   closeTime: Date;
+  isDeleted: boolean;
 }
 
 const TradeHistorySchema = new Schema<ITradeHistory>(
@@ -24,7 +25,8 @@ const TradeHistorySchema = new Schema<ITradeHistory>(
     closePrice: { type: Number, required: true },
     pnl: { type: Number, required: true },
     openTime: { type: Date, required: true },
-    closeTime: { type: Date, required: true }
+    closeTime: { type: Date, required: true },
+    isDeleted: { type: Boolean, default: false }
   },
   { timestamps: true }
 );
