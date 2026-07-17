@@ -27,6 +27,7 @@ import economicCalendarRoutes from './src/routes/economicCalendarRoutes';
 import orderRoutes from './src/routes/orderRoutes';
 import profileRoutes from './src/routes/profileRoutes';
 import transactionRoutes from './src/routes/transactionRoutes';
+import exchangeRateRoutes from './src/routes/exchangeRateRoutes';
 import { protect } from './src/middleware/authMiddleware';
 import { getClosedPositions } from './src/controllers/tradingController';
 
@@ -86,6 +87,7 @@ app.use('/api/news', newsRoutes);
 app.use('/api/economic-calendar', economicCalendarRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/profile', profileRoutes);
+app.use('/api/exchange-rates', exchangeRateRoutes);
 
 // Central error handling
 app.use(errorHandler);

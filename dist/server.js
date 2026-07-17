@@ -1,10 +1,5 @@
-"use strict";
-var __create = Object.create;
 var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __esm = (fn, res) => function __init() {
   return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
@@ -12,36 +7,20 @@ var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
 
 // src/models/Wallet.ts
 var Wallet_exports = {};
 __export(Wallet_exports, {
   WalletModel: () => WalletModel
 });
-var import_mongoose3, WalletSchema, roundToTwo, WalletModel;
+import mongoose3, { Schema as Schema2 } from "mongoose";
+var WalletSchema, roundToTwo, WalletModel;
 var init_Wallet = __esm({
   "src/models/Wallet.ts"() {
     "use strict";
-    import_mongoose3 = __toESM(require("mongoose"), 1);
-    WalletSchema = new import_mongoose3.Schema(
+    WalletSchema = new Schema2(
       {
-        userId: { type: import_mongoose3.Schema.Types.ObjectId, required: true, ref: "User" },
+        userId: { type: Schema2.Types.ObjectId, required: true, ref: "User" },
         balance: { type: Number, default: 0 },
         equity: { type: Number, default: 0 },
         margin: { type: Number, default: 0 },
@@ -75,18 +54,18 @@ var init_Wallet = __esm({
         }
       }
     });
-    WalletModel = import_mongoose3.default.model("Wallet", WalletSchema);
+    WalletModel = mongoose3.model("Wallet", WalletSchema);
   }
 });
 
 // src/providers/rapidApiClient.ts
-var import_axios, import_dotenv2, RapidApiClient;
+import axios from "axios";
+import dotenv2 from "dotenv";
+var RapidApiClient;
 var init_rapidApiClient = __esm({
   "src/providers/rapidApiClient.ts"() {
     "use strict";
-    import_axios = __toESM(require("axios"), 1);
-    import_dotenv2 = __toESM(require("dotenv"), 1);
-    import_dotenv2.default.config({ path: "./.env" });
+    dotenv2.config({ path: "./.env" });
     RapidApiClient = class _RapidApiClient {
       static instance;
       client;
@@ -98,7 +77,7 @@ var init_rapidApiClient = __esm({
         if (!apiKey) {
           throw new Error("RapidAPI Key is not configured in .env");
         }
-        const factory = import_axios.default.create;
+        const factory = axios.create;
         const isPublicYahoo = apiHost === "query1.finance.yahoo.com";
         const headers = {
           "Content-Type": "application/json",
@@ -113,7 +92,7 @@ var init_rapidApiClient = __esm({
           timeout: 1e4,
           headers
         }) : void 0;
-        this.client = createdClient ?? import_axios.default;
+        this.client = createdClient ?? axios;
       }
       static getInstance() {
         if (!_RapidApiClient.instance) {
@@ -210,11 +189,11 @@ var init_symbolMapper = __esm({
 });
 
 // src/providers/marketProvider.ts
-var import_axios2, MarketProvider;
+import axios2 from "axios";
+var MarketProvider;
 var init_marketProvider = __esm({
   "src/providers/marketProvider.ts"() {
     "use strict";
-    import_axios2 = __toESM(require("axios"), 1);
     init_rapidApiClient();
     init_symbolMapper();
     MarketProvider = class {
@@ -383,7 +362,7 @@ var init_marketProvider = __esm({
               const tdSymbol = normalized.length === 6 ? `${normalized.substring(0, 3)}/${normalized.substring(3)}` : normalized;
               const tdInterval = interval === "1m" ? "1min" : interval === "5m" ? "5min" : interval === "15m" ? "15min" : interval === "30m" ? "30min" : interval === "60m" ? "1h" : "1day";
               const tdUrl = `https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=${tdInterval}&outputsize=5000&timezone=UTC&apikey=${twelveDataKey}`;
-              const tdResponse = await import_axios2.default.get(tdUrl, { timeout: 8e3 });
+              const tdResponse = await axios2.get(tdUrl, { timeout: 8e3 });
               if (tdResponse.data && tdResponse.data.values) {
                 const nowSeconds = Math.floor(Date.now() / 1e3);
                 candles = tdResponse.data.values.map((v) => ({
@@ -444,7 +423,7 @@ var init_marketProvider = __esm({
         if (candles.length === 0) {
           try {
             const fallbackUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${rapidApiSymbol}`;
-            const response = await import_axios2.default.get(fallbackUrl, {
+            const response = await axios2.get(fallbackUrl, {
               params: { interval, range },
               headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -480,7 +459,7 @@ var init_marketProvider = __esm({
         if (!rapidApiKey) {
           throw new Error("RapidAPI Key is not configured in .env");
         }
-        const response = await import_axios2.default.get("https://trading-view.p.rapidapi.com/market/get-movers", {
+        const response = await axios2.get("https://trading-view.p.rapidapi.com/market/get-movers", {
           params: { exchange, name, locale },
           headers: {
             "Content-Type": "application/json",
@@ -516,12 +495,12 @@ var Symbol_exports = {};
 __export(Symbol_exports, {
   SymbolModel: () => SymbolModel
 });
-var import_mongoose6, SymbolSchema, SymbolModel;
+import mongoose6, { Schema as Schema5 } from "mongoose";
+var SymbolSchema, SymbolModel;
 var init_Symbol = __esm({
   "src/models/Symbol.ts"() {
     "use strict";
-    import_mongoose6 = __toESM(require("mongoose"), 1);
-    SymbolSchema = new import_mongoose6.Schema(
+    SymbolSchema = new Schema5(
       {
         symbol: { type: String, required: true, unique: true, uppercase: true, trim: true },
         name: { type: String, required: true },
@@ -542,7 +521,7 @@ var init_Symbol = __esm({
       },
       { timestamps: true }
     );
-    SymbolModel = import_mongoose6.default.model("Symbol", SymbolSchema);
+    SymbolModel = mongoose6.model("Symbol", SymbolSchema);
   }
 });
 
@@ -803,14 +782,14 @@ var Position_exports = {};
 __export(Position_exports, {
   PositionModel: () => PositionModel
 });
-var import_mongoose7, PositionSchema, PositionModel;
+import mongoose7, { Schema as Schema6 } from "mongoose";
+var PositionSchema, PositionModel;
 var init_Position = __esm({
   "src/models/Position.ts"() {
     "use strict";
-    import_mongoose7 = __toESM(require("mongoose"), 1);
-    PositionSchema = new import_mongoose7.Schema(
+    PositionSchema = new Schema6(
       {
-        userId: { type: import_mongoose7.Schema.Types.ObjectId, ref: "User", required: true },
+        userId: { type: Schema6.Types.ObjectId, ref: "User", required: true },
         symbol: { type: String, required: true },
         type: { type: String, enum: ["BUY", "SELL"], required: true },
         volume: { type: Number, required: true },
@@ -829,7 +808,7 @@ var init_Position = __esm({
       },
       { timestamps: true }
     );
-    PositionModel = import_mongoose7.default.model("Position", PositionSchema);
+    PositionModel = mongoose7.model("Position", PositionSchema);
   }
 });
 
@@ -838,14 +817,14 @@ var Order_exports = {};
 __export(Order_exports, {
   OrderModel: () => OrderModel
 });
-var import_mongoose8, OrderSchema, OrderModel;
+import mongoose8, { Schema as Schema7 } from "mongoose";
+var OrderSchema, OrderModel;
 var init_Order = __esm({
   "src/models/Order.ts"() {
     "use strict";
-    import_mongoose8 = __toESM(require("mongoose"), 1);
-    OrderSchema = new import_mongoose8.Schema(
+    OrderSchema = new Schema7(
       {
-        userId: { type: import_mongoose8.Schema.Types.ObjectId, ref: "User", required: true },
+        userId: { type: Schema7.Types.ObjectId, ref: "User", required: true },
         symbol: { type: String, required: true },
         type: { type: String, enum: ["BUY", "SELL", "BUY_LIMIT", "SELL_LIMIT", "BUY_STOP", "SELL_STOP"], required: true },
         volume: { type: Number, required: true },
@@ -857,7 +836,7 @@ var init_Order = __esm({
       },
       { timestamps: true }
     );
-    OrderModel = import_mongoose8.default.model("Order", OrderSchema);
+    OrderModel = mongoose8.model("Order", OrderSchema);
   }
 });
 
@@ -866,12 +845,12 @@ var MarketSettings_exports = {};
 __export(MarketSettings_exports, {
   MarketSettingsModel: () => MarketSettingsModel
 });
-var import_mongoose11, MarketSettingsSchema, MarketSettingsModel;
+import mongoose11, { Schema as Schema10 } from "mongoose";
+var MarketSettingsSchema, MarketSettingsModel;
 var init_MarketSettings = __esm({
   "src/models/MarketSettings.ts"() {
     "use strict";
-    import_mongoose11 = __toESM(require("mongoose"), 1);
-    MarketSettingsSchema = new import_mongoose11.Schema(
+    MarketSettingsSchema = new Schema10(
       {
         status: { type: String, enum: ["OPEN", "CLOSED"], default: "OPEN" },
         trend: { type: String, enum: ["BULLISH", "BEARISH", "NORMAL"], default: "NORMAL" },
@@ -881,12 +860,12 @@ var init_MarketSettings = __esm({
         globalTradingStatus: { type: String, enum: ["ON", "OFF"], default: "ON" },
         globalGraphStatus: { type: String, enum: ["LIVE", "PAUSED"], default: "LIVE" },
         globalMarketStatus: { type: String, enum: ["OPEN", "CLOSED", "MAINTENANCE", "HOLIDAY"], default: "OPEN" },
-        lastUpdatedBy: { type: import_mongoose11.Schema.Types.ObjectId, ref: "User" },
+        lastUpdatedBy: { type: Schema10.Types.ObjectId, ref: "User" },
         reason: { type: String }
       },
       { timestamps: true }
     );
-    MarketSettingsModel = import_mongoose11.default.model("MarketSettings", MarketSettingsSchema);
+    MarketSettingsModel = mongoose11.model("MarketSettings", MarketSettingsSchema);
   }
 });
 
@@ -895,15 +874,15 @@ var TradeHistory_exports = {};
 __export(TradeHistory_exports, {
   TradeHistoryModel: () => TradeHistoryModel
 });
-var import_mongoose21, TradeHistorySchema, TradeHistoryModel;
+import mongoose21, { Schema as Schema19 } from "mongoose";
+var TradeHistorySchema, TradeHistoryModel;
 var init_TradeHistory = __esm({
   "src/models/TradeHistory.ts"() {
     "use strict";
-    import_mongoose21 = __toESM(require("mongoose"), 1);
-    TradeHistorySchema = new import_mongoose21.Schema(
+    TradeHistorySchema = new Schema19(
       {
-        userId: { type: import_mongoose21.Schema.Types.ObjectId, ref: "User", required: true },
-        positionId: { type: import_mongoose21.Schema.Types.ObjectId, ref: "Position", required: true },
+        userId: { type: Schema19.Types.ObjectId, ref: "User", required: true },
+        positionId: { type: Schema19.Types.ObjectId, ref: "Position", required: true },
         symbol: { type: String, required: true },
         type: { type: String, enum: ["BUY", "SELL"], required: true },
         volume: { type: Number, required: true },
@@ -916,7 +895,7 @@ var init_TradeHistory = __esm({
       },
       { timestamps: true }
     );
-    TradeHistoryModel = import_mongoose21.default.model("TradeHistory", TradeHistorySchema);
+    TradeHistoryModel = mongoose21.model("TradeHistory", TradeHistorySchema);
   }
 });
 
@@ -976,16 +955,16 @@ var init_tradeUtils = __esm({
 });
 
 // server.ts
-var import_dotenv3 = __toESM(require("dotenv"), 1);
-var import_express20 = __toESM(require("express"), 1);
-var import_cors = __toESM(require("cors"), 1);
+import dotenv3 from "dotenv";
+import express8 from "express";
+import cors from "cors";
 
 // src/config/database.ts
-var import_mongoose = __toESM(require("mongoose"), 1);
+import mongoose from "mongoose";
 
 // src/config/env.ts
-var import_dotenv = __toESM(require("dotenv"), 1);
-import_dotenv.default.config();
+import dotenv from "dotenv";
+dotenv.config();
 var nodeEnv = process.env.NODE_ENV || "development";
 var defaultJwtSecret = nodeEnv === "production" ? "" : "dev-jwt-secret-change-me";
 var defaultRefreshSecret = nodeEnv === "production" ? "" : "dev-refresh-secret-change-me";
@@ -1014,13 +993,13 @@ var connectDatabase = async () => {
       const { MongoMemoryServer } = await import("mongodb-memory-server");
       mongoServer = await MongoMemoryServer.create();
       const uri = mongoServer.getUri();
-      await import_mongoose.default.connect(uri, {
+      await mongoose.connect(uri, {
         serverSelectionTimeoutMS: 5e3,
         socketTimeoutMS: 45e3
       });
       console.log("MongoDB Connected Successfully (in-memory)");
     } else {
-      await import_mongoose.default.connect(config.mongoUri, {
+      await mongoose.connect(config.mongoUri, {
         serverSelectionTimeoutMS: 5e3,
         socketTimeoutMS: 45e3
       });
@@ -1030,11 +1009,11 @@ var connectDatabase = async () => {
     console.error("MongoDB connection error:", err);
     process.exit(1);
   }
-  import_mongoose.default.connection.on("error", (err) => {
+  mongoose.connection.on("error", (err) => {
     console.error("MongoDB error:", err);
   });
   const gracefulExit = async () => {
-    await import_mongoose.default.connection.close();
+    await mongoose.connection.close();
     if (mongoServer) {
       await mongoServer.stop();
     }
@@ -1046,14 +1025,14 @@ var connectDatabase = async () => {
 };
 
 // src/routes/authRoutes.ts
-var import_express = require("express");
+import { Router } from "express";
 
 // src/controllers/authController.ts
-var import_bcryptjs = __toESM(require("bcryptjs"), 1);
+import bcrypt from "bcryptjs";
 
 // src/models/User.ts
-var import_mongoose2 = __toESM(require("mongoose"), 1);
-var UserSchema = new import_mongoose2.Schema(
+import mongoose2, { Schema } from "mongoose";
+var UserSchema = new Schema(
   {
     username: { type: String, required: true, unique: true, minlength: 4 },
     fullName: { type: String },
@@ -1081,16 +1060,16 @@ UserSchema.set("toJSON", {
     return ret;
   }
 });
-var UserModel = import_mongoose2.default.model("User", UserSchema);
+var UserModel = mongoose2.model("User", UserSchema);
 
 // src/controllers/authController.ts
 init_Wallet();
 
 // src/models/Kyc.ts
-var import_mongoose4 = __toESM(require("mongoose"), 1);
-var KycSchema = new import_mongoose4.Schema(
+import mongoose4, { Schema as Schema3 } from "mongoose";
+var KycSchema = new Schema3(
   {
-    userId: { type: import_mongoose4.Schema.Types.ObjectId, ref: "User", required: true, unique: true },
+    userId: { type: Schema3.Types.ObjectId, ref: "User", required: true, unique: true },
     status: { type: String, enum: ["UNSUBMITTED", "PENDING", "APPROVED", "REJECTED"], default: "UNSUBMITTED" },
     aadharNumber: { type: String },
     aadharDocument: { type: String },
@@ -1108,32 +1087,32 @@ var KycSchema = new import_mongoose4.Schema(
   },
   { timestamps: true }
 );
-var KycModel = import_mongoose4.default.model("Kyc", KycSchema);
+var KycModel = mongoose4.model("Kyc", KycSchema);
 
 // src/models/Settings.ts
-var import_mongoose5 = __toESM(require("mongoose"), 1);
-var SettingsSchema = new import_mongoose5.Schema(
+import mongoose5, { Schema as Schema4 } from "mongoose";
+var SettingsSchema = new Schema4(
   {
-    userId: { type: import_mongoose5.Schema.Types.ObjectId, ref: "User", required: true, unique: true },
+    userId: { type: Schema4.Types.ObjectId, ref: "User", required: true, unique: true },
     theme: { type: String, enum: ["light", "dark"], default: "light" },
     notifications: { type: Boolean, default: true },
     language: { type: String, default: "en" }
   },
   { timestamps: true }
 );
-var SettingsModel = import_mongoose5.default.model("Settings", SettingsSchema);
+var SettingsModel = mongoose5.model("Settings", SettingsSchema);
 
 // src/utils/jwt.ts
-var import_jsonwebtoken = __toESM(require("jsonwebtoken"), 1);
+import jwt from "jsonwebtoken";
 var signAccessToken = (payload, expiresIn = "1d") => {
-  return import_jsonwebtoken.default.sign(payload, config.jwtSecret, { expiresIn });
+  return jwt.sign(payload, config.jwtSecret, { expiresIn });
 };
 var signRefreshToken = (payload, expiresIn = "7d") => {
-  return import_jsonwebtoken.default.sign(payload, config.jwtRefreshSecret, { expiresIn });
+  return jwt.sign(payload, config.jwtRefreshSecret, { expiresIn });
 };
 var verifyToken = (token, isRefresh = false) => {
   const secret = isRefresh ? config.jwtRefreshSecret : config.jwtSecret;
-  return import_jsonwebtoken.default.verify(token, secret);
+  return jwt.verify(token, secret);
 };
 
 // src/controllers/authController.ts
@@ -1154,7 +1133,7 @@ var register = async (req, res, next) => {
     if (existing) {
       return res.status(400).json({ error: "Username already taken" });
     }
-    const hashed = await import_bcryptjs.default.hash(password, 12);
+    const hashed = await bcrypt.hash(password, 12);
     const user = await UserModel.create({
       username: username.toLowerCase(),
       passwordHash: hashed,
@@ -1205,7 +1184,7 @@ var login = async (req, res, next) => {
       return res.status(401).json({ error: "Invalid credentials" });
     }
     const hash = user.passwordHash || user.password || "";
-    const match = await import_bcryptjs.default.compare(passwordInput, hash);
+    const match = await bcrypt.compare(passwordInput, hash);
     if (!match) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -1265,7 +1244,7 @@ var admin = (req, res, next) => {
 
 // src/routes/authRoutes.ts
 console.log("\u2705 authRoutes loaded");
-var router = (0, import_express.Router)();
+var router = Router();
 router.get("/test", (req, res) => {
   res.status(200).json({
     success: true,
@@ -1278,8 +1257,8 @@ router.get("/me", protect, getProfile);
 var authRoutes_default = router;
 
 // src/routes/healthRoutes.ts
-var import_express2 = require("express");
-var router2 = (0, import_express2.Router)();
+import { Router as Router2 } from "express";
+var router2 = Router2();
 router2.get("/", (_req, res) => {
   res.json({ success: true, database: "connected" });
 });
@@ -1294,10 +1273,10 @@ var errorHandler = (err, _req, res, _next) => {
 };
 
 // server.ts
-var import_http = __toESM(require("http"), 1);
+import http from "http";
 
 // src/services/socketServer.ts
-var import_socket = require("socket.io");
+import { Server } from "socket.io";
 var SocketServer = class {
   static io = null;
   static connectedUsers = /* @__PURE__ */ new Set();
@@ -1305,7 +1284,7 @@ var SocketServer = class {
     if (this.io) {
       return this.io;
     }
-    this.io = new import_socket.Server(server2, {
+    this.io = new Server(server2, {
       cors: {
         origin: true,
         methods: ["GET", "POST"],
@@ -1860,10 +1839,10 @@ init_Symbol();
 init_market_service();
 
 // src/models/Notification.ts
-var import_mongoose9 = __toESM(require("mongoose"), 1);
-var NotificationSchema = new import_mongoose9.Schema(
+import mongoose9, { Schema as Schema8 } from "mongoose";
+var NotificationSchema = new Schema8(
   {
-    userId: { type: import_mongoose9.Schema.Types.ObjectId, ref: "User", required: true },
+    userId: { type: Schema8.Types.ObjectId, ref: "User", required: true },
     title: { type: String, required: true },
     message: { type: String, required: true },
     type: { type: String, required: true },
@@ -1871,21 +1850,21 @@ var NotificationSchema = new import_mongoose9.Schema(
   },
   { timestamps: true }
 );
-var NotificationModel = import_mongoose9.default.model("Notification", NotificationSchema);
+var NotificationModel = mongoose9.model("Notification", NotificationSchema);
 
 // src/models/AuditLog.ts
-var import_mongoose10 = __toESM(require("mongoose"), 1);
-var AuditLogSchema = new import_mongoose10.Schema(
+import mongoose10, { Schema as Schema9 } from "mongoose";
+var AuditLogSchema = new Schema9(
   {
-    adminId: { type: import_mongoose10.Schema.Types.ObjectId, ref: "User" },
-    userId: { type: import_mongoose10.Schema.Types.ObjectId, ref: "User" },
+    adminId: { type: Schema9.Types.ObjectId, ref: "User" },
+    userId: { type: Schema9.Types.ObjectId, ref: "User" },
     action: { type: String, required: true },
-    details: { type: import_mongoose10.Schema.Types.Mixed },
+    details: { type: Schema9.Types.Mixed },
     ipAddress: { type: String }
   },
   { timestamps: true }
 );
-var AuditLogModel = import_mongoose10.default.model("AuditLog", AuditLogSchema);
+var AuditLogModel = mongoose10.model("AuditLog", AuditLogSchema);
 
 // src/services/orderExecutionEngine.ts
 var OrderExecutionEngine = class {
@@ -2068,16 +2047,16 @@ var PriceEngine = class {
 };
 
 // src/routes/walletRoutes.ts
-var import_express3 = require("express");
+import { Router as Router3 } from "express";
 
 // src/controllers/walletController.ts
 init_Wallet();
 
 // src/models/Transaction.ts
-var import_mongoose12 = __toESM(require("mongoose"), 1);
-var TransactionSchema = new import_mongoose12.Schema(
+import mongoose12, { Schema as Schema11 } from "mongoose";
+var TransactionSchema = new Schema11(
   {
-    userId: { type: import_mongoose12.Schema.Types.ObjectId, required: true, ref: "User" },
+    userId: { type: Schema11.Types.ObjectId, required: true, ref: "User" },
     type: { type: String, enum: ["DEPOSIT", "WITHDRAW", "TRADE", "BONUS", "TRADE_LOSS", "ADMIN_ADJUSTMENT", "WITHDRAWAL"], required: true },
     amount: { type: Number, required: true },
     balanceAfter: { type: Number },
@@ -2090,7 +2069,7 @@ var TransactionSchema = new import_mongoose12.Schema(
   },
   { timestamps: true }
 );
-var TransactionModel = import_mongoose12.default.model("Transaction", TransactionSchema);
+var TransactionModel = mongoose12.model("Transaction", TransactionSchema);
 
 // src/controllers/walletController.ts
 var getWallet = async (req, res) => {
@@ -2137,20 +2116,20 @@ var fundWallet = async (req, res) => {
 };
 
 // src/routes/walletRoutes.ts
-var router3 = (0, import_express3.Router)();
+var router3 = Router3();
 router3.use(protect);
 router3.get("/", getWallet);
 router3.post("/fund", fundWallet);
 var walletRoutes_default = router3;
 
 // src/routes/depositRoutes.ts
-var import_express4 = require("express");
+import { Router as Router4 } from "express";
 
 // src/models/Deposit.ts
-var import_mongoose13 = __toESM(require("mongoose"), 1);
-var DepositSchema = new import_mongoose13.Schema(
+import mongoose13, { Schema as Schema12 } from "mongoose";
+var DepositSchema = new Schema12(
   {
-    userId: { type: import_mongoose13.Schema.Types.ObjectId, required: true, ref: "User" },
+    userId: { type: Schema12.Types.ObjectId, required: true, ref: "User" },
     amount: { type: Number, required: true },
     currency: { type: String, required: true, default: "USD" },
     paymentMethod: { type: String, enum: ["UPI", "NETBANKING"], required: true, default: "UPI" },
@@ -2161,7 +2140,7 @@ var DepositSchema = new import_mongoose13.Schema(
     remarks: { type: String },
     exchangeRate: { type: Number },
     creditedUSD: { type: Number },
-    approvedBy: { type: import_mongoose13.Schema.Types.ObjectId, ref: "User" },
+    approvedBy: { type: Schema12.Types.ObjectId, ref: "User" },
     approvedAt: { type: Date },
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date },
@@ -2169,7 +2148,7 @@ var DepositSchema = new import_mongoose13.Schema(
   },
   { timestamps: true }
 );
-var DepositModel = import_mongoose13.default.model("Deposit", DepositSchema);
+var DepositModel = mongoose13.model("Deposit", DepositSchema);
 
 // src/controllers/depositController.ts
 var createDeposit = async (req, res) => {
@@ -2226,24 +2205,23 @@ var getDeposits = async (req, res) => {
 };
 
 // src/middleware/uploadMiddleware.ts
-var import_multer = __toESM(require("multer"), 1);
-var import_path = __toESM(require("path"), 1);
-var import_fs = __toESM(require("fs"), 1);
-var import_url = require("url");
-var import_meta = {};
-var __filename = (0, import_url.fileURLToPath)(import_meta.url);
-var __dirname = import_path.default.dirname(__filename);
-var uploadDir = import_path.default.join(__dirname, "../../uploads");
-if (!import_fs.default.existsSync(uploadDir)) {
-  import_fs.default.mkdirSync(uploadDir, { recursive: true });
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
+var __filename = fileURLToPath(import.meta.url);
+var __dirname = path.dirname(__filename);
+var uploadDir = path.join(__dirname, "../../uploads");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
 }
-var storage = import_multer.default.diskStorage({
+var storage = multer.diskStorage({
   destination(req, file, cb) {
     cb(null, uploadDir);
   },
   filename(req, file, cb) {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, `${file.fieldname}-${uniqueSuffix}${import_path.default.extname(file.originalname)}`);
+    cb(null, `${file.fieldname}-${uniqueSuffix}${path.extname(file.originalname)}`);
   }
 });
 var fileFilter = (req, file, cb) => {
@@ -2254,7 +2232,7 @@ var fileFilter = (req, file, cb) => {
     cb(new Error("Invalid file type. Only JPEG, PNG, and WebP are allowed."));
   }
 };
-var upload = (0, import_multer.default)({
+var upload = multer({
   storage,
   fileFilter,
   limits: {
@@ -2264,7 +2242,7 @@ var upload = (0, import_multer.default)({
 });
 
 // src/routes/depositRoutes.ts
-var router4 = (0, import_express4.Router)();
+var router4 = Router4();
 router4.use(protect);
 router4.post("/", upload.single("screenshot"), createDeposit);
 router4.get("/", getDeposits);
@@ -2272,16 +2250,16 @@ router4.get("/history", getDeposits);
 var depositRoutes_default = router4;
 
 // src/routes/withdrawalRoutes.ts
-var import_express5 = __toESM(require("express"), 1);
+import express from "express";
 
 // src/models/Withdrawal.ts
-var import_mongoose14 = __toESM(require("mongoose"), 1);
-var WithdrawalSchema = new import_mongoose14.Schema(
+import mongoose14, { Schema as Schema13 } from "mongoose";
+var WithdrawalSchema = new Schema13(
   {
-    userId: { type: import_mongoose14.Schema.Types.ObjectId, ref: "User", required: true },
+    userId: { type: Schema13.Types.ObjectId, ref: "User", required: true },
     amount: { type: Number, required: true },
     currency: { type: String, enum: ["USD", "INR", "EUR"], default: "USD" },
-    bankDetails: { type: import_mongoose14.Schema.Types.Mixed, required: true },
+    bankDetails: { type: Schema13.Types.Mixed, required: true },
     status: { type: String, enum: ["PENDING", "APPROVED", "REJECTED"], default: "PENDING" },
     adminNotes: { type: String },
     exchangeRate: { type: Number },
@@ -2292,7 +2270,7 @@ var WithdrawalSchema = new import_mongoose14.Schema(
   },
   { timestamps: true }
 );
-var WithdrawalModel = import_mongoose14.default.model("Withdrawal", WithdrawalSchema);
+var WithdrawalModel = mongoose14.model("Withdrawal", WithdrawalSchema);
 
 // src/controllers/withdrawalController.ts
 init_Wallet();
@@ -2359,22 +2337,22 @@ var getWithdrawals = async (req, res) => {
 };
 
 // src/routes/withdrawalRoutes.ts
-var router5 = import_express5.default.Router();
+var router5 = express.Router();
 router5.use(protect);
 router5.post("/", requestWithdrawal);
 router5.get("/", getWithdrawals);
 var withdrawalRoutes_default = router5;
 
 // src/routes/kycRoutes.ts
-var import_express6 = require("express");
-var import_multer2 = __toESM(require("multer"), 1);
-var import_path3 = __toESM(require("path"), 1);
-var import_fs3 = __toESM(require("fs"), 1);
+import { Router as Router5 } from "express";
+import multer2 from "multer";
+import path3 from "path";
+import fs3 from "fs";
 
 // src/controllers/kycController.ts
-var import_mongoose15 = __toESM(require("mongoose"), 1);
-var import_path2 = __toESM(require("path"), 1);
-var import_fs2 = __toESM(require("fs"), 1);
+import mongoose15 from "mongoose";
+import path2 from "path";
+import fs2 from "fs";
 var submitKyc = async (req, res) => {
   try {
     console.log("[KYC POST] Request received");
@@ -2387,7 +2365,7 @@ var submitKyc = async (req, res) => {
     }
     let userId;
     try {
-      userId = new import_mongoose15.default.Types.ObjectId(rawUserId);
+      userId = new mongoose15.Types.ObjectId(rawUserId);
       console.log("[KYC POST] Converted userId:", userId);
     } catch (err) {
       console.error("[KYC POST] ObjectId conversion failed:", err);
@@ -2414,15 +2392,15 @@ var submitKyc = async (req, res) => {
       const payload = getBase64Payload(dataUri);
       if (!payload) return null;
       const buffer = Buffer.from(payload, "base64");
-      const uploadsDir = import_path2.default.join(process.cwd(), "uploads", "kyc");
-      if (!import_fs2.default.existsSync(uploadsDir)) import_fs2.default.mkdirSync(uploadsDir, { recursive: true });
+      const uploadsDir = path2.join(process.cwd(), "uploads", "kyc");
+      if (!fs2.existsSync(uploadsDir)) fs2.mkdirSync(uploadsDir, { recursive: true });
       const extMatch = dataUri.match(/^data:image\/(\w+);base64,/);
       const ext = extMatch ? extMatch[1] : "bin";
       const fileName = `${filePrefix}_${Date.now()}_${Math.floor(Math.random() * 1e4)}.${ext}`;
-      const filePath = import_path2.default.join(uploadsDir, fileName);
-      import_fs2.default.writeFileSync(filePath, buffer);
+      const filePath = path2.join(uploadsDir, fileName);
+      fs2.writeFileSync(filePath, buffer);
       const baseUrl = process.env.UPLOAD_BASE_URL || "";
-      const rel = import_path2.default.relative(import_path2.default.join(process.cwd(), "uploads"), filePath).split(import_path2.default.sep).join("/");
+      const rel = path2.relative(path2.join(process.cwd(), "uploads"), filePath).split(path2.sep).join("/");
       return baseUrl ? `${baseUrl}/uploads/${rel}` : `/uploads/${rel}`;
     };
     const missingFields = [];
@@ -2530,7 +2508,7 @@ var submitKyc = async (req, res) => {
 var getKyc = async (req, res) => {
   try {
     const rawUserId = req.user.id;
-    const userId = new import_mongoose15.default.Types.ObjectId(rawUserId);
+    const userId = new mongoose15.Types.ObjectId(rawUserId);
     console.log(`[KYC GET] Request for user ${userId}`);
     let kyc = await KycModel.findOne({ userId });
     const user = await UserModel.findById(userId);
@@ -2567,13 +2545,13 @@ var uploadKycFiles = async (req, res) => {
     }
     const baseUrl = process.env.UPLOAD_BASE_URL || "";
     const fileUrls = files.map((f) => {
-      const rel = import_path2.default.relative(import_path2.default.join(process.cwd(), "uploads"), f.path).split(import_path2.default.sep).join("/");
+      const rel = path2.relative(path2.join(process.cwd(), "uploads"), f.path).split(path2.sep).join("/");
       return baseUrl ? `${baseUrl}/uploads/${rel}` : `/uploads/${rel}`;
     });
     try {
       const rawUserId = req.user?.id;
       if (rawUserId) {
-        const userId = new import_mongoose15.default.Types.ObjectId(rawUserId);
+        const userId = new mongoose15.Types.ObjectId(rawUserId);
         let kyc = await KycModel.findOne({ userId });
         if (!kyc) {
           kyc = await KycModel.create({ userId, documents: fileUrls, status: "PENDING" });
@@ -2594,11 +2572,11 @@ var uploadKycFiles = async (req, res) => {
 };
 
 // src/routes/kycRoutes.ts
-var router6 = (0, import_express6.Router)();
+var router6 = Router5();
 router6.use(protect);
-var uploadDir2 = import_path3.default.join(process.cwd(), "uploads", "kyc");
-import_fs3.default.mkdirSync(uploadDir2, { recursive: true });
-var storage2 = import_multer2.default.diskStorage({
+var uploadDir2 = path3.join(process.cwd(), "uploads", "kyc");
+fs3.mkdirSync(uploadDir2, { recursive: true });
+var storage2 = multer2.diskStorage({
   destination: function(req, file, cb) {
     cb(null, uploadDir2);
   },
@@ -2607,14 +2585,14 @@ var storage2 = import_multer2.default.diskStorage({
     cb(null, unique);
   }
 });
-var upload2 = (0, import_multer2.default)({ storage: storage2, limits: { fileSize: 10 * 1024 * 1024 } });
+var upload2 = multer2({ storage: storage2, limits: { fileSize: 10 * 1024 * 1024 } });
 router6.post("/upload", upload2.array("files", 6), uploadKycFiles);
 router6.post("/", submitKyc);
 router6.get("/", getKyc);
 var kycRoutes_default = router6;
 
 // src/routes/tradingRoutes.ts
-var import_express7 = require("express");
+import { Router as Router6 } from "express";
 
 // src/controllers/tradingController.ts
 init_Position();
@@ -2890,7 +2868,7 @@ var partialClosePosition = async (req, res) => {
 };
 
 // src/routes/tradingRoutes.ts
-var router7 = (0, import_express7.Router)();
+var router7 = Router6();
 router7.use(protect);
 router7.get("/positions", getPositions);
 router7.get("/closed-positions", getClosedPositions);
@@ -2906,21 +2884,21 @@ router7.post("/positions/:id/partial-close", partialClosePosition);
 var tradingRoutes_default = router7;
 
 // src/routes/copyTradingRoutes.ts
-var import_express8 = __toESM(require("express"), 1);
+import express2 from "express";
 
 // src/models/CopyTrader.ts
-var import_mongoose16 = __toESM(require("mongoose"), 1);
-var CopyTraderSchema = new import_mongoose16.Schema(
+import mongoose16, { Schema as Schema14 } from "mongoose";
+var CopyTraderSchema = new Schema14(
   {
-    providerId: { type: import_mongoose16.Schema.Types.ObjectId, ref: "User", required: true },
-    followerId: { type: import_mongoose16.Schema.Types.ObjectId, ref: "User", required: true },
+    providerId: { type: Schema14.Types.ObjectId, ref: "User", required: true },
+    followerId: { type: Schema14.Types.ObjectId, ref: "User", required: true },
     allocationRatio: { type: Number, default: 1 },
     profitSharePercent: { type: Number, default: 20 },
     status: { type: String, enum: ["ACTIVE", "PAUSED", "STOPPED"], default: "ACTIVE" }
   },
   { timestamps: true }
 );
-var CopyTraderModel = import_mongoose16.default.model("CopyTrader", CopyTraderSchema);
+var CopyTraderModel = mongoose16.model("CopyTrader", CopyTraderSchema);
 
 // src/controllers/copyTradingController.ts
 var becomeProvider = async (req, res) => {
@@ -2963,7 +2941,7 @@ var getProviders = async (req, res) => {
 };
 
 // src/routes/copyTradingRoutes.ts
-var router8 = import_express8.default.Router();
+var router8 = express2.Router();
 router8.get("/providers", getProviders);
 router8.use(protect);
 router8.post("/become-provider", becomeProvider);
@@ -2971,18 +2949,18 @@ router8.post("/follow", followProvider);
 var copyTradingRoutes_default = router8;
 
 // src/routes/watchlistRoutes.ts
-var import_express9 = require("express");
+import { Router as Router7 } from "express";
 
 // src/models/Watchlist.ts
-var import_mongoose17 = __toESM(require("mongoose"), 1);
-var WatchlistSchema = new import_mongoose17.Schema(
+import mongoose17, { Schema as Schema15 } from "mongoose";
+var WatchlistSchema = new Schema15(
   {
-    userId: { type: import_mongoose17.Schema.Types.ObjectId, ref: "User", required: true, unique: true },
+    userId: { type: Schema15.Types.ObjectId, ref: "User", required: true, unique: true },
     symbols: [{ type: String }]
   },
   { timestamps: true }
 );
-var WatchlistModel = import_mongoose17.default.model("Watchlist", WatchlistSchema);
+var WatchlistModel = mongoose17.model("Watchlist", WatchlistSchema);
 
 // src/controllers/watchlistController.ts
 var getWatchlist = async (req, res) => {
@@ -3015,20 +2993,20 @@ var updateWatchlist = async (req, res) => {
 };
 
 // src/routes/watchlistRoutes.ts
-var router9 = (0, import_express9.Router)();
+var router9 = Router7();
 router9.use(protect);
 router9.get("/", getWatchlist);
 router9.put("/", updateWatchlist);
 var watchlistRoutes_default = router9;
 
 // src/routes/alertRoutes.ts
-var import_express10 = require("express");
+import { Router as Router8 } from "express";
 
 // src/models/Alert.ts
-var import_mongoose18 = __toESM(require("mongoose"), 1);
-var AlertSchema = new import_mongoose18.Schema(
+import mongoose18, { Schema as Schema16 } from "mongoose";
+var AlertSchema = new Schema16(
   {
-    userId: { type: import_mongoose18.Schema.Types.ObjectId, ref: "User", required: true },
+    userId: { type: Schema16.Types.ObjectId, ref: "User", required: true },
     symbol: { type: String, required: true },
     condition: { type: String, enum: ["ABOVE", "BELOW"], required: true },
     targetPrice: { type: Number, required: true },
@@ -3040,7 +3018,7 @@ AlertSchema.index(
   { userId: 1, symbol: 1, condition: 1, targetPrice: 1 },
   { unique: true, partialFilterExpression: { status: "ACTIVE" } }
 );
-var AlertModel = import_mongoose18.default.model("Alert", AlertSchema);
+var AlertModel = mongoose18.model("Alert", AlertSchema);
 
 // src/controllers/alertController.ts
 var getAlerts = async (req, res) => {
@@ -3102,7 +3080,7 @@ var deleteAlert = async (req, res) => {
 };
 
 // src/routes/alertRoutes.ts
-var router10 = (0, import_express10.Router)();
+var router10 = Router8();
 router10.use(protect);
 router10.get("/", getAlerts);
 router10.post("/", createAlert);
@@ -3111,7 +3089,7 @@ router10.delete("/:id", deleteAlert);
 var alertRoutes_default = router10;
 
 // src/routes/adminRoutes.ts
-var import_express11 = require("express");
+import { Router as Router9 } from "express";
 
 // src/controllers/adminController.ts
 init_Wallet();
@@ -3119,37 +3097,37 @@ init_Position();
 init_Symbol();
 
 // src/models/News.ts
-var import_mongoose19 = __toESM(require("mongoose"), 1);
-var NewsSchema = new import_mongoose19.Schema(
+import mongoose19, { Schema as Schema17 } from "mongoose";
+var NewsSchema = new Schema17(
   {
     title: { type: String, required: true },
     summary: { type: String, required: true },
     content: { type: String, required: true },
     category: { type: String, required: true, default: "global" },
     source: { type: String, required: true },
-    authorId: { type: import_mongoose19.Schema.Types.ObjectId, ref: "User", required: true }
+    authorId: { type: Schema17.Types.ObjectId, ref: "User", required: true }
   },
   { timestamps: true }
 );
-var NewsModel = import_mongoose19.default.model("News", NewsSchema);
+var NewsModel = mongoose19.model("News", NewsSchema);
 
 // src/controllers/adminController.ts
-var import_bcryptjs2 = __toESM(require("bcryptjs"), 1);
+import bcrypt2 from "bcryptjs";
 
 // src/models/ExchangeRate.ts
-var import_mongoose20 = __toESM(require("mongoose"), 1);
-var ExchangeRateSchema = new import_mongoose20.Schema(
+import mongoose20, { Schema as Schema18 } from "mongoose";
+var ExchangeRateSchema = new Schema18(
   {
     currentRate: { type: Number, required: true },
     baseCurrency: { type: String, required: true, default: "USD" },
     quoteCurrency: { type: String, required: true, default: "INR" },
     provider: { type: String, enum: ["MANUAL", "LIVE"], default: "MANUAL" },
     isActive: { type: Boolean, default: true },
-    updatedBy: { type: import_mongoose20.Schema.Types.ObjectId, ref: "User" }
+    updatedBy: { type: Schema18.Types.ObjectId, ref: "User" }
   },
   { timestamps: true }
 );
-var ExchangeRateModel = import_mongoose20.default.model("ExchangeRate", ExchangeRateSchema);
+var ExchangeRateModel = mongoose20.model("ExchangeRate", ExchangeRateSchema);
 
 // src/controllers/adminController.ts
 var logAdminAction = async (adminId, action, details) => {
@@ -3312,8 +3290,8 @@ var adminUserControl = async (req, res) => {
     if (action === "ENABLE") user.status = "ACTIVE";
     if (action === "BLOCK_TRADING") user.status = "TRADING_BLOCKED";
     if (action === "RESET_PASSWORD" && newPassword) {
-      const salt = await import_bcryptjs2.default.genSalt(10);
-      user.password = await import_bcryptjs2.default.hash(newPassword, salt);
+      const salt = await bcrypt2.genSalt(10);
+      user.password = await bcrypt2.hash(newPassword, salt);
     }
     await user.save();
     await logAdminAction(req.user.id, "USER_CONTROL", { userId, action });
@@ -3835,7 +3813,7 @@ var getHistoryRecords = async (req, res) => {
 };
 
 // src/controllers/adminDepositController.ts
-var import_mongoose22 = __toESM(require("mongoose"), 1);
+import mongoose22 from "mongoose";
 init_Wallet();
 var getAllDeposits = async (req, res) => {
   try {
@@ -3858,7 +3836,7 @@ var getDepositById = async (req, res) => {
 var approveDeposit = async (req, res) => {
   let retries = 3;
   while (retries > 0) {
-    const session = await import_mongoose22.default.startSession();
+    const session = await mongoose22.startSession();
     session.startTransaction();
     try {
       const { id } = req.params;
@@ -3995,7 +3973,7 @@ var blockDeposit = async (req, res) => {
 };
 
 // src/routes/adminRoutes.ts
-var router11 = (0, import_express11.Router)();
+var router11 = Router9();
 router11.use(protect, admin);
 router11.get("/dashboard", getAdminDashboardData);
 router11.get("/users", getAllUsers);
@@ -4038,11 +4016,11 @@ router11.post("/user", adminUserControl);
 var adminRoutes_default = router11;
 
 // src/routes/paymentSettingsRoutes.ts
-var import_express12 = require("express");
+import { Router as Router10 } from "express";
 
 // src/models/PaymentSettings.ts
-var import_mongoose23 = __toESM(require("mongoose"), 1);
-var PaymentSettingsSchema = new import_mongoose23.Schema(
+import mongoose23, { Schema as Schema20 } from "mongoose";
+var PaymentSettingsSchema = new Schema20(
   {
     upiEnabled: { type: Boolean, default: false },
     bankEnabled: { type: Boolean, default: false },
@@ -4059,15 +4037,15 @@ var PaymentSettingsSchema = new import_mongoose23.Schema(
     branch: { type: String, default: "" },
     accountType: { type: String, default: "" },
     instructions: { type: String, default: "" },
-    updatedBy: { type: import_mongoose23.Schema.Types.ObjectId, ref: "User" }
+    updatedBy: { type: Schema20.Types.ObjectId, ref: "User" }
   },
   { timestamps: true }
 );
-var PaymentSettingsModel = import_mongoose23.default.model("PaymentSettings", PaymentSettingsSchema);
+var PaymentSettingsModel = mongoose23.model("PaymentSettings", PaymentSettingsSchema);
 
 // src/controllers/paymentSettingsController.ts
-var import_path4 = __toESM(require("path"), 1);
-var import_fs4 = __toESM(require("fs"), 1);
+import path4 from "path";
+import fs4 from "fs";
 var getPaymentSettings = async (req, res) => {
   try {
     let settings = await PaymentSettingsModel.findOne();
@@ -4107,8 +4085,8 @@ var uploadQR = async (req, res) => {
       settings = await PaymentSettingsModel.create({ qrImage: qrImageUrl });
     } else {
       if (settings.qrImage && settings.qrImage.startsWith("/uploads/")) {
-        const oldPath = import_path4.default.join(process.cwd(), settings.qrImage);
-        if (import_fs4.default.existsSync(oldPath)) import_fs4.default.unlinkSync(oldPath);
+        const oldPath = path4.join(process.cwd(), settings.qrImage);
+        if (fs4.existsSync(oldPath)) fs4.unlinkSync(oldPath);
       }
       settings.qrImage = qrImageUrl;
       settings.qrCodeUrl = qrImageUrl;
@@ -4127,8 +4105,8 @@ var deleteQR = async (req, res) => {
     let settings = await PaymentSettingsModel.findOne();
     if (settings) {
       if (settings.qrImage && settings.qrImage.startsWith("/uploads/")) {
-        const oldPath = import_path4.default.join(process.cwd(), settings.qrImage);
-        if (import_fs4.default.existsSync(oldPath)) import_fs4.default.unlinkSync(oldPath);
+        const oldPath = path4.join(process.cwd(), settings.qrImage);
+        if (fs4.existsSync(oldPath)) fs4.unlinkSync(oldPath);
       }
       settings.qrImage = "";
       settings.qrCodeUrl = "";
@@ -4144,7 +4122,7 @@ var deleteQR = async (req, res) => {
 };
 
 // src/routes/paymentSettingsRoutes.ts
-var router12 = (0, import_express12.Router)();
+var router12 = Router10();
 router12.get("/", getPaymentSettings);
 router12.patch("/", protect, admin, updatePaymentSettings);
 router12.post("/upload-qr", protect, admin, upload.single("qrImage"), uploadQR);
@@ -4152,7 +4130,7 @@ router12.delete("/qr", protect, admin, deleteQR);
 var paymentSettingsRoutes_default = router12;
 
 // src/routes/market.routes.ts
-var import_express13 = __toESM(require("express"), 1);
+import express3 from "express";
 
 // src/controllers/market.controller.ts
 init_market_service();
@@ -4325,7 +4303,7 @@ var getCrudeOilChart = async (req, res) => {
 };
 
 // src/routes/market.routes.ts
-var router13 = import_express13.default.Router();
+var router13 = express3.Router();
 router13.get("/tickers", getTickers);
 router13.get("/platform-status", async (req, res) => {
   try {
@@ -4355,10 +4333,10 @@ router13.get("/crude-oil-chart", getCrudeOilChart);
 var market_routes_default = router13;
 
 // src/routes/newsRoutes.ts
-var import_express14 = __toESM(require("express"), 1);
+import express4 from "express";
 
 // src/services/newsService.ts
-var import_axios3 = __toESM(require("axios"), 1);
+import axios3 from "axios";
 var MARKET_AUX_BASE_URL = "https://api.marketaux.com/v1";
 var CACHE_TTL_MS = 1e3 * 60 * 2;
 var RETRY_ATTEMPTS = 1;
@@ -4386,7 +4364,7 @@ var DEFAULT_FILTER_PARAMS = {
 };
 var NewsService = class {
   static cache = /* @__PURE__ */ new Map();
-  static http = import_axios3.default.create({
+  static http = axios3.create({
     baseURL: MARKET_AUX_BASE_URL,
     timeout: 1e4
   });
@@ -4604,7 +4582,7 @@ var getNewsSources = async (req, res) => {
 };
 
 // src/routes/newsRoutes.ts
-var router14 = import_express14.default.Router();
+var router14 = express4.Router();
 router14.get("/", getLatestNews);
 router14.get("/forex", getForexNews);
 router14.get("/search", searchNews);
@@ -4615,20 +4593,20 @@ router14.get("/:symbol", getSymbolNews);
 var newsRoutes_default = router14;
 
 // src/routes/economicCalendarRoutes.ts
-var import_express15 = __toESM(require("express"), 1);
+import express5 from "express";
 
 // src/controllers/economicCalendarController.ts
-var import_promises = __toESM(require("fs/promises"), 1);
-var import_path5 = __toESM(require("path"), 1);
+import fs5 from "fs/promises";
+import path5 from "path";
 
 // src/providers/forexCalendarProvider.ts
-var import_axios4 = __toESM(require("axios"), 1);
+import axios4 from "axios";
 var API_HOST = process.env.RAPID_API_FOREX_CALENDAR_HOST || "forex-calendar.p.rapidapi.com";
 var API_KEY = process.env.RAPIDAPI_KEY;
 if (!API_KEY) {
   throw new Error("RAPIDAPI_KEY is not configured in .env");
 }
-var client = import_axios4.default.create({
+var client = axios4.create({
   baseURL: `https://${API_HOST}`,
   timeout: 15e3,
   headers: {
@@ -4680,11 +4658,11 @@ async function fetchForexCalendar(timezone = "America/New_York") {
 }
 
 // src/controllers/economicCalendarController.ts
-var DATA_DIR = import_path5.default.join(process.cwd(), "data");
-var CALENDAR_FILE = import_path5.default.join(DATA_DIR, "economicCalendar.json");
+var DATA_DIR = path5.join(process.cwd(), "data");
+var CALENDAR_FILE = path5.join(DATA_DIR, "economicCalendar.json");
 async function readStoredCalendar() {
   try {
-    const raw = await import_promises.default.readFile(CALENDAR_FILE, "utf8");
+    const raw = await fs5.readFile(CALENDAR_FILE, "utf8");
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed?.calendar) ? parsed.calendar : parsed;
   } catch (err) {
@@ -4702,8 +4680,8 @@ var getEconomicCalendar = async (req, res) => {
     try {
       const fetched = await fetchForexCalendar(timezone);
       if (fetched.length > 0) {
-        await import_promises.default.mkdir(DATA_DIR, { recursive: true });
-        await import_promises.default.writeFile(CALENDAR_FILE, JSON.stringify({ calendar: fetched }, null, 2), "utf8");
+        await fs5.mkdir(DATA_DIR, { recursive: true });
+        await fs5.writeFile(CALENDAR_FILE, JSON.stringify({ calendar: fetched }, null, 2), "utf8");
         return res.json({ calendar: fetched });
       }
     } catch (fetchError) {
@@ -4734,8 +4712,8 @@ var importEconomicCalendar = async (req, res) => {
     if (!calendar || !Array.isArray(calendar)) {
       return res.status(400).json({ error: "Invalid payload. Expected { calendar: [ ... ] }" });
     }
-    await import_promises.default.mkdir(DATA_DIR, { recursive: true });
-    await import_promises.default.writeFile(CALENDAR_FILE, JSON.stringify({ calendar }, null, 2), "utf8");
+    await fs5.mkdir(DATA_DIR, { recursive: true });
+    await fs5.writeFile(CALENDAR_FILE, JSON.stringify({ calendar }, null, 2), "utf8");
     res.json({ success: true, calendar });
   } catch (error) {
     res.status(500).json({ error: error.message || "Failed to import calendar" });
@@ -4743,13 +4721,13 @@ var importEconomicCalendar = async (req, res) => {
 };
 
 // src/routes/economicCalendarRoutes.ts
-var router15 = import_express15.default.Router();
+var router15 = express5.Router();
 router15.get("/", getEconomicCalendar);
 router15.post("/import", importEconomicCalendar);
 var economicCalendarRoutes_default = router15;
 
 // src/routes/orderRoutes.ts
-var import_express16 = require("express");
+import { Router as Router11 } from "express";
 
 // src/controllers/orderController.ts
 init_Order();
@@ -4827,14 +4805,14 @@ var deleteOrder = async (req, res) => {
 };
 
 // src/routes/orderRoutes.ts
-var router16 = (0, import_express16.Router)();
+var router16 = Router11();
 router16.use(protect);
 router16.route("/").get(getOrders2).post(createOrder2);
 router16.route("/:id").get(getOrderById).patch(updateOrder).delete(deleteOrder);
 var orderRoutes_default = router16;
 
 // src/routes/profileRoutes.ts
-var import_express17 = __toESM(require("express"), 1);
+import express6 from "express";
 
 // src/controllers/profileController.ts
 var getProfile2 = async (req, res) => {
@@ -4923,13 +4901,13 @@ var updateProfile = async (req, res) => {
 };
 
 // src/routes/profileRoutes.ts
-var router17 = import_express17.default.Router();
+var router17 = express6.Router();
 router17.get("/", protect, getProfile2);
 router17.put("/", protect, updateProfile);
 var profileRoutes_default = router17;
 
 // src/routes/transactionRoutes.ts
-var import_express18 = require("express");
+import { Router as Router12 } from "express";
 
 // src/controllers/transactionController.ts
 var getTransactions = async (req, res) => {
@@ -4951,12 +4929,12 @@ var getTransactions = async (req, res) => {
 };
 
 // src/routes/transactionRoutes.ts
-var router18 = (0, import_express18.Router)();
+var router18 = Router12();
 router18.get("/", protect, getTransactions);
 var transactionRoutes_default = router18;
 
 // src/routes/exchangeRateRoutes.ts
-var import_express19 = __toESM(require("express"), 1);
+import express7 from "express";
 
 // src/controllers/exchangeRateController.ts
 var initDefaultRate = async () => {
@@ -5014,19 +4992,19 @@ var getExchangeRateHistory = async (req, res) => {
 };
 
 // src/routes/exchangeRateRoutes.ts
-var router19 = import_express19.default.Router();
+var router19 = express7.Router();
 router19.get("/current", getCurrentExchangeRate);
 router19.post("/", protect, admin, updateExchangeRate);
 router19.get("/history", protect, admin, getExchangeRateHistory);
 var exchangeRateRoutes_default = router19;
 
 // server.ts
-var import_path6 = __toESM(require("path"), 1);
-import_dotenv3.default.config({ path: "./.env" });
+import path6 from "path";
+dotenv3.config({ path: "./.env" });
 console.log("MONGO URI =", process.env.MONGODB_URI);
-var app = (0, import_express20.default)();
+var app = express8();
 var allowedOrigins = (process.env.FRONTEND_URL ?? "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174").split(",").map((origin) => origin.trim()).filter(Boolean);
-app.use((0, import_cors.default)({
+app.use(cors({
   origin: (origin, callback) => {
     if (!origin) {
       callback(null, true);
@@ -5043,9 +5021,9 @@ app.use((0, import_cors.default)({
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
 }));
-app.use(import_express20.default.json({ limit: "50mb" }));
-app.use(import_express20.default.urlencoded({ limit: "50mb", extended: true }));
-app.use("/uploads", import_express20.default.static(import_path6.default.join(process.cwd(), "uploads")));
+app.use(express8.json({ limit: "50mb" }));
+app.use(express8.urlencoded({ limit: "50mb", extended: true }));
+app.use("/uploads", express8.static(path6.join(process.cwd(), "uploads")));
 app.use("/api/auth", authRoutes_default);
 app.use("/api/health", healthRoutes_default);
 app.use("/api/wallet", walletRoutes_default);
@@ -5068,7 +5046,7 @@ app.use("/api/orders", orderRoutes_default);
 app.use("/api/profile", profileRoutes_default);
 app.use("/api/exchange-rates", exchangeRateRoutes_default);
 app.use(errorHandler);
-var server = import_http.default.createServer(app);
+var server = http.createServer(app);
 SocketServer.init(server);
 var start = async () => {
   await connectDatabase();
@@ -5079,4 +5057,4 @@ var start = async () => {
   });
 };
 start();
-//# sourceMappingURL=server.cjs.map
+//# sourceMappingURL=server.js.map
