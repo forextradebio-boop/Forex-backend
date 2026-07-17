@@ -61,7 +61,7 @@ export const createPosition = async (req: Request, res: Response) => {
     const walletState = TradingEngine.evaluateWallet(wallet.balance, currentOpenPositions, allPrices);
     
     const spec = await SymbolSpecification.get(symbol);
-    if (!spec || !spec.isActive) return res.status(400).json({ error: 'Disabled Symbol' });
+    if (!spec || spec.status !== 'OPEN' || !spec.tradingEnabled) return res.status(400).json({ error: 'Trading is disabled or market closed for this symbol' });
 
     const quote = await MarketService.getQuote(symbol);
     if (!quote) return res.status(503).json({ error: 'Market data unavailable' });

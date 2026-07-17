@@ -4,7 +4,7 @@ import { SymbolMapper } from '../providers/symbolMapper';
 
 export const getTickers = async (req: Request, res: Response) => {
   try {
-    const symbols = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'NZDUSD', 'EURJPY', 'EURGBP', 'GBPJPY', 'XAUUSD', 'XAGUSD', 'BTCUSD', 'ETHUSD'];
+    const symbols = await MarketService.getWatchSymbols();
     const quotes = await MarketService.getQuotes(symbols);
     res.json(Object.values(quotes));
   } catch (error: any) {

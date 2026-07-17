@@ -6,7 +6,12 @@ import { SocketServer } from '../services/socketServer';
 export const createDeposit = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
-    const { amount, currency = 'USD', paymentMethod = 'UPI', utr, screenshot } = req.body;
+    const { amount, currency = 'USD', paymentMethod = 'UPI', utr } = req.body;
+    let screenshot = req.body.screenshot || '';
+    
+    if (req.file) {
+      screenshot = `/uploads/${req.file.filename}`;
+    }
     
     if (!amount || amount <= 0) {
       return res.status(400).json({ error: 'Amount must be greater than 0' });

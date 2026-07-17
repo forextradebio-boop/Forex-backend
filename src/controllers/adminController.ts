@@ -13,6 +13,7 @@ import { NewsModel } from '../models/News';
 import bcrypt from 'bcryptjs';
 import { MarginEngine } from '../services/marginEngine';
 import { SocketServer } from '../services/socketServer';
+import { ExchangeRateModel } from '../models/ExchangeRate';
 
 const logAdminAction = async (adminId: any, action: string, details: any) => {
   await AuditLogModel.create({ adminId, action, details });
@@ -113,7 +114,12 @@ export const approveWithdrawal = async (req: Request, res: Response) => {
     const withdrawal = await WithdrawalModel.findById(id);
     if (!withdrawal) return res.status(404).json({ error: 'Not found' });
 
+    const exchangeRateDoc = await ExchangeRateModel.findOne({ isActive: true });
+    const rate = exchangeRateDoc ? exchangeRateDoc.currentRate : 85;
+
     withdrawal.status = 'APPROVED';
+    withdrawal.exchangeRate = rate;
+    withdrawal.receivedINR = withdrawal.amount * rate;
     await withdrawal.save();
 
     const wallet = await WalletModel.findOne({ userId: withdrawal.userId });
@@ -218,8 +224,14 @@ export const adminUserControl = async (req: Request, res: Response) => {
 
 export const getAllUsers = async (req: Request, res: Response) => {
   try {
-    const users = await UserModel.find().select('-password -passwordHash');
-    res.json({ users });
+    const users = await UserModel.find().select('-password -passwordHash').lean();
+    const wallets = await WalletModel.find().lean();
+    const walletMap = new Map();
+    for (const w of wallets) {
+      walletMap.set(w.userId.toString(), w);
+    }
+    const populated = users.map(u => ({ ...u, wallet: walletMap.get(u._id.toString()) || null }));
+    res.json({ users: populated });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -227,7 +239,10 @@ export const getAllUsers = async (req: Request, res: Response) => {
 
 export const getKycRequests = async (req: Request, res: Response) => {
   try {
-    const kycRequests = await KycModel.find().populate('userId', 'fullName email username kycStatus');
+    const kycRequests = await KycModel.find()
+      .populate('userId', 'fullName email username kycStatus')
+      .sort({ createdAt: -1 });
+    console.log('[GET /admin/kyc] fetched kycRequests count:', kycRequests.length);
     res.json({ kycRequests });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -243,10 +258,111 @@ export const getWithdrawals = async (req: Request, res: Response) => {
   }
 };
 
+export const clearUserHistory = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { TradeHistoryModel } = await import('../models/TradeHistory');
+    // Soft delete
+    await TradeHistoryModel.updateMany({ userId: id }, { isDeleted: true });
+    await logAdminAction((req as any).user.id, 'CLEAR_USER_HISTORY_SOFT', { userId: id });
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 export const getSymbols = async (req: Request, res: Response) => {
   try {
-    const symbols = await SymbolModel.find().sort({ symbol: 1 });
-    res.json({ symbols });
+    const symbols = await SymbolModel.find().lean();
+    
+    // Aggregate open positions by symbol
+    const activePositions = await PositionModel.aggregate([
+      { $match: { status: 'OPEN' } },
+      { $group: { _id: '$symbol', count: { $sum: 1 } } }
+    ]);
+    const positionsMap = new Map(activePositions.map(p => [p._id, p.count]));
+    
+    const enrichedSymbols = symbols.map(s => ({
+      ...s,
+      openPositions: positionsMap.get(s.symbol) || 0,
+      connectedUsers: Math.floor(Math.random() * 50) + 10 // Mocked for now
+    }));
+    
+    res.json({ symbols: enrichedSymbols });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const updateSymbolStatus = async (req: Request, res: Response) => {
+  try {
+    const { symbol } = req.params;
+    const { status, visibleToUsers, tradingEnabled, spread, leverageLimit } = req.body;
+    
+    const targetSymbol = await SymbolModel.findOne({ symbol: symbol.toUpperCase() });
+    if (!targetSymbol) return res.status(404).json({ error: 'Symbol not found' });
+    
+    const oldStatus = targetSymbol.status;
+    if (status) targetSymbol.status = status;
+    if (visibleToUsers !== undefined) targetSymbol.visibleToUsers = visibleToUsers;
+    if (tradingEnabled !== undefined) targetSymbol.tradingEnabled = tradingEnabled;
+    if (spread !== undefined) targetSymbol.spread = spread;
+    if (leverageLimit !== undefined) targetSymbol.leverageLimit = leverageLimit;
+
+    await targetSymbol.save();
+    
+    const { SymbolSpecification } = await import('../engine/SymbolSpecification');
+    await SymbolSpecification.loadAll();
+
+    // Broadcast status change
+    SocketServer.broadcastMarketUpdate([{
+      symbol: targetSymbol.symbol,
+      status: targetSymbol.status,
+      visibleToUsers: targetSymbol.visibleToUsers,
+      tradingEnabled: targetSymbol.tradingEnabled,
+      spread: targetSymbol.spread
+    }]);
+
+    await logAdminAction((req as any).user.id, 'UPDATE_SYMBOL', { 
+      symbol, 
+      oldStatus, 
+      newStatus: targetSymbol.status 
+    });
+
+    res.json({ success: true, symbol: targetSymbol });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const getUserDetails = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const user = await UserModel.findById(id).select('-password -passwordHash');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const wallet = await WalletModel.findOne({ userId: id });
+    const kyc = await KycModel.findOne({ userId: id });
+    
+    // Fetch only non-deleted financial records
+    const deposits = await DepositModel.find({ userId: id, isDeleted: false }).sort({ createdAt: -1 });
+    const withdrawals = await WithdrawalModel.find({ userId: id, isDeleted: false }).sort({ createdAt: -1 });
+    const transactions = await TransactionModel.find({ userId: id, isDeleted: false }).sort({ createdAt: -1 });
+    
+    const { TradeHistoryModel } = await import('../models/TradeHistory');
+    const trades = await TradeHistoryModel.find({ userId: id, isDeleted: false }).sort({ createdAt: -1 });
+    const openPositions = await PositionModel.find({ userId: id, status: 'OPEN' });
+
+    res.json({
+      user,
+      wallet,
+      kyc,
+      deposits,
+      withdrawals,
+      transactions,
+      trades,
+      openPositions
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -371,6 +487,7 @@ export const dispatchNotification = async (req: Request, res: Response) => {
 export const forceCloseTrade = async (req: Request, res: Response) => {
   try {
     const { posId } = req.params;
+    const { price } = req.body;
     const position = await PositionModel.findById(posId);
     if (!position) return res.status(404).json({ error: 'Position not found' });
 
@@ -380,23 +497,34 @@ export const forceCloseTrade = async (req: Request, res: Response) => {
 
     const { MarketService } = await import('../services/market.service');
     const { TradeUtils } = await import('../services/tradeUtils');
-    const quote = await MarketService.getQuote(position.symbol);
-    if (!quote) return res.status(503).json({ error: 'Market data unavailable' });
-
-    position.status = 'CLOSED';
-    position.closePrice = position.type === 'BUY' ? quote.bid : quote.ask;
     
-    const sym = await SymbolModel.findOne({ symbol: position.symbol.toUpperCase() });
+    position.status = 'CLOSED';
+    position.closePrice = price ? Number(price) : position.currentPrice;
     
     position.pnl = TradeUtils.calculatePnl(
       position.type,
       position.openPrice,
-      position.type === 'BUY' ? position.closePrice : quote.bid, // bid is needed, wait TradeUtils wants currentBid and currentAsk
-      position.type === 'SELL' ? position.closePrice : quote.ask, // ask is needed
+      position.closePrice, // bid
+      position.closePrice, // ask
       position.volume,
       position.symbol
     );
     await position.save();
+
+    // Create trade history entry
+    const { TradeHistoryModel } = await import('../models/TradeHistory');
+    await TradeHistoryModel.create({
+      userId: position.userId,
+      positionId: position._id,
+      symbol: position.symbol,
+      type: position.type,
+      volume: position.volume,
+      openPrice: position.openPrice,
+      closePrice: position.closePrice,
+      pnl: position.pnl,
+      openTime: position.createdAt,
+      closeTime: new Date()
+    });
 
     const wallet = await WalletModel.findOne({ userId: position.userId });
     if (wallet) {
@@ -407,8 +535,302 @@ export const forceCloseTrade = async (req: Request, res: Response) => {
       await MarginEngine.calculateMargin(position.userId.toString(), openPositions, {});
     }
 
-    await logAdminAction((req as any).user.id, 'FORCE_CLOSE_POSITION', { positionId: posId });
+    await logAdminAction((req as any).user.id, 'FORCE_CLOSE_POSITION', { positionId: posId, closePrice: position.closePrice });
     res.json(position);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const getMarketSettings = async (req: Request, res: Response) => {
+  try {
+    const { MarketSettingsModel } = await import('../models/MarketSettings');
+    let settings = await MarketSettingsModel.findOne();
+    if (!settings) {
+      settings = await MarketSettingsModel.create({});
+    }
+    res.json(settings);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const updateMarketSettings = async (req: Request, res: Response) => {
+  try {
+    const { MarketSettingsModel } = await import('../models/MarketSettings');
+    let settings = await MarketSettingsModel.findOne();
+    if (!settings) {
+      settings = await MarketSettingsModel.create({});
+    }
+    Object.assign(settings, req.body);
+    await settings.save();
+    res.json(settings);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const updatePlatformTradingStatus = async (req: Request, res: Response) => {
+  try {
+    const { MarketSettingsModel } = await import('../models/MarketSettings');
+    let settings = await MarketSettingsModel.findOne() || await MarketSettingsModel.create({});
+    
+    settings.globalTradingStatus = req.body.status;
+    settings.lastUpdatedBy = (req as any).user?._id;
+    settings.reason = req.body.reason;
+    await settings.save();
+    
+    const { getSocketServer } = await import('../socket');
+    const io = getSocketServer();
+    if (io) {
+      io.emit('PLATFORM_STATUS_UPDATED', settings);
+    }
+    
+    res.json(settings);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const updatePlatformGraphStatus = async (req: Request, res: Response) => {
+  try {
+    const { MarketSettingsModel } = await import('../models/MarketSettings');
+    let settings = await MarketSettingsModel.findOne() || await MarketSettingsModel.create({});
+    
+    settings.globalGraphStatus = req.body.status;
+    settings.lastUpdatedBy = (req as any).user?._id;
+    settings.reason = req.body.reason;
+    await settings.save();
+    
+    const { getSocketServer } = await import('../socket');
+    const io = getSocketServer();
+    if (io) {
+      io.emit('PLATFORM_STATUS_UPDATED', settings);
+    }
+    
+    res.json(settings);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const updatePlatformMarketStatus = async (req: Request, res: Response) => {
+  try {
+    const { MarketSettingsModel } = await import('../models/MarketSettings');
+    let settings = await MarketSettingsModel.findOne() || await MarketSettingsModel.create({});
+    
+    settings.globalMarketStatus = req.body.status;
+    settings.lastUpdatedBy = (req as any).user?._id;
+    settings.reason = req.body.reason;
+    await settings.save();
+    
+    const { getSocketServer } = await import('../socket');
+    const io = getSocketServer();
+    if (io) {
+      io.emit('PLATFORM_STATUS_UPDATED', settings);
+    }
+    
+    res.json(settings);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const getAllTrades = async (req: Request, res: Response) => {
+  try {
+    const { OrderModel } = await import('../models/Order');
+    
+    // Fetch all open positions, closed positions, and pending orders
+    const [openPositions, closedPositions, pendingOrders] = await Promise.all([
+      PositionModel.find({ status: 'OPEN' }).populate('userId', 'fullName email'),
+      PositionModel.find({ status: 'CLOSED' }).populate('userId', 'fullName email'),
+      OrderModel.find({ status: 'PENDING' }).populate('userId', 'fullName email')
+    ]);
+
+    const openTrades = openPositions.map(p => ({
+      id: p._id,
+      userId: p.userId?._id,
+      userFullName: (p.userId as any)?.fullName || 'Unknown User',
+      assetSymbol: p.symbol,
+      assetType: 'FOREX',
+      direction: p.type,
+      amount: p.volume,
+      leverage: (p as any).leverage || 100,
+      entryPrice: p.openPrice,
+      exitPrice: p.currentPrice, // For open trades, exitPrice isn't set yet, show currentPrice or undefined
+      profit: p.pnl,
+      status: 'OPEN',
+      createdAt: p.createdAt
+    }));
+
+    const closedTradesList = closedPositions.map(p => ({
+      id: p._id,
+      userId: p.userId?._id,
+      userFullName: (p.userId as any)?.fullName || 'Unknown User',
+      assetSymbol: p.symbol,
+      assetType: 'FOREX',
+      direction: p.type,
+      amount: p.volume,
+      leverage: (p as any).leverage || 100,
+      entryPrice: p.openPrice,
+      exitPrice: p.closePrice,
+      profit: p.pnl,
+      status: 'CLOSED',
+      createdAt: p.createdAt
+    }));
+
+    const pendingTrades = pendingOrders.map(o => ({
+      id: o._id,
+      userId: o.userId?._id,
+      userFullName: (o.userId as any)?.fullName || 'Unknown User',
+      assetSymbol: o.symbol,
+      assetType: 'FOREX',
+      direction: o.type,
+      amount: o.volume,
+      leverage: (o as any).leverage || 100,
+      entryPrice: o.targetPrice,
+      exitPrice: undefined,
+      profit: 0,
+      status: 'PENDING',
+      createdAt: o.createdAt
+    }));
+
+    res.json([...openTrades, ...closedTradesList, ...pendingTrades]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const cancelPendingOrder = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { OrderModel } = await import('../models/Order');
+
+    const order = await OrderModel.findById(id);
+    if (!order || order.status !== 'PENDING') {
+      return res.status(404).json({ error: 'Pending order not found' });
+    }
+
+    order.status = 'CANCELLED';
+    await order.save();
+
+    await logAdminAction((req as any).user?.id, 'CANCEL_PENDING_ORDER', { orderId: id, symbol: order.symbol });
+
+    res.json(order);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+const getModelForType = (type: string) => {
+  switch (type) {
+    case 'deposit': return DepositModel;
+    case 'withdrawal': return WithdrawalModel;
+    case 'position': return PositionModel;
+    case 'transaction': return TransactionModel;
+    default: return null;
+  }
+};
+
+export const archiveRecord = async (req: Request, res: Response) => {
+  try {
+    const { type, id } = req.params;
+    const model = getModelForType(type);
+    if (!model) return res.status(400).json({ error: 'Invalid record type' });
+
+    const record = await (model as any).findById(id);
+    if (!record) return res.status(404).json({ error: 'Record not found' });
+
+    record.isArchived = true;
+    await record.save();
+    
+    await logAdminAction((req as any).user?.id, `ARCHIVE_RECORD_${type.toUpperCase()}`, { recordId: id });
+    res.json(record);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const restoreRecord = async (req: Request, res: Response) => {
+  try {
+    const { type, id } = req.params;
+    const model = getModelForType(type);
+    if (!model) return res.status(400).json({ error: 'Invalid record type' });
+
+    const record = await (model as any).findById(id);
+    if (!record) return res.status(404).json({ error: 'Record not found' });
+
+    record.isArchived = false;
+    record.isDeleted = false;
+    record.deletedAt = undefined;
+    await record.save();
+    
+    await logAdminAction((req as any).user?.id, `RESTORE_RECORD_${type.toUpperCase()}`, { recordId: id });
+    res.json(record);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const softDeleteRecord = async (req: Request, res: Response) => {
+  try {
+    const { type, id } = req.params;
+    const model = getModelForType(type);
+    if (!model) return res.status(400).json({ error: 'Invalid record type' });
+
+    const record = await (model as any).findById(id);
+    if (!record) return res.status(404).json({ error: 'Record not found' });
+
+    record.isDeleted = true;
+    record.deletedAt = new Date();
+    await record.save();
+    
+    await logAdminAction((req as any).user?.id, `SOFT_DELETE_RECORD_${type.toUpperCase()}`, { recordId: id });
+    res.json({ success: true, record });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const hardDeleteRecord = async (req: Request, res: Response) => {
+  try {
+    const adminUser = await UserModel.findById((req as any).user.id);
+    if (!adminUser || adminUser.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ error: 'Only Super Admin can hard delete financial records' });
+    }
+
+    const { type, id } = req.params;
+    const model = getModelForType(type);
+    if (!model) return res.status(400).json({ error: 'Invalid record type' });
+
+    await (model as any).findByIdAndDelete(id);
+    
+    await logAdminAction(adminUser.id, `HARD_DELETE_RECORD_${type.toUpperCase()}`, { recordId: id });
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const getHistoryRecords = async (req: Request, res: Response) => {
+  try {
+    const { type } = req.params;
+    const { archived, deleted } = req.query;
+    const model = getModelForType(type);
+    if (!model) return res.status(400).json({ error: 'Invalid record type' });
+
+    let query: any = {};
+    if (archived === 'true') {
+      query.isArchived = true;
+    } else if (deleted === 'true') {
+      query.isDeleted = true;
+    } else {
+      query.isArchived = { $ne: true };
+      query.isDeleted = { $ne: true };
+    }
+
+    const records = await (model as any).find(query).populate('userId', 'fullName email').sort({ createdAt: -1 });
+    res.json(records);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
