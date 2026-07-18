@@ -12,6 +12,12 @@ const buildUploadUrl = (filename: string) => {
   return `/api/uploads/${filename}`;
 };
 
+const getStoredFilename = (value?: string) => {
+  if (!value) return '';
+  const match = value.match(/(?:\/uploads\/|\/api\/uploads\/)([^/?#]+)$/i);
+  return match?.[1] || '';
+};
+
 export const getPaymentSettings = async (req: Request, res: Response) => {
   try {
     let settings = await PaymentSettingsModel.findOne();
@@ -64,8 +70,9 @@ export const uploadQR = async (req: Request, res: Response) => {
       settings = await PaymentSettingsModel.create({ qrImage: qrImageUrl });
     } else {
       // Optional: Delete old QR image from disk here to save space
-      if (settings.qrImage && settings.qrImage.startsWith('/uploads/')) {
-        const oldPath = path.join(process.cwd(), settings.qrImage);
+      const previousFilename = getStoredFilename(settings.qrImage);
+      if (previousFilename) {
+        const oldPath = path.join(process.cwd(), 'uploads', previousFilename);
         if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
       }
       
@@ -87,8 +94,9 @@ export const deleteQR = async (req: Request, res: Response) => {
   try {
     let settings = await PaymentSettingsModel.findOne();
     if (settings) {
-      if (settings.qrImage && settings.qrImage.startsWith('/uploads/')) {
-        const oldPath = path.join(process.cwd(), settings.qrImage);
+      const previousFilename = getStoredFilename(settings.qrImage);
+      if (previousFilename) {
+        const oldPath = path.join(process.cwd(), 'uploads', previousFilename);
         if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
       }
       
