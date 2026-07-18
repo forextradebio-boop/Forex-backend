@@ -3,12 +3,29 @@ import { PaymentSettingsModel } from '../models/PaymentSettings';
 import path from 'path';
 import fs from 'fs';
 
+const buildUploadUrl = (filename: string) => {
+  const baseUrl = process.env.UPLOAD_BASE_URL || process.env.API_BASE_URL || '';
+  if (baseUrl) {
+    const normalizedBase = baseUrl.replace(/\/$/, '');
+    return `${normalizedBase}/uploads/${filename}`;
+  }
+  return `/api/uploads/${filename}`;
+};
+
 export const getPaymentSettings = async (req: Request, res: Response) => {
   try {
     let settings = await PaymentSettingsModel.findOne();
     if (!settings) {
       settings = await PaymentSettingsModel.create({});
     }
+
+    if (settings.qrImage && settings.qrImage.startsWith('/uploads/')) {
+      settings.qrImage = buildUploadUrl(settings.qrImage.replace('/uploads/', ''));
+    }
+    if (settings.qrCodeUrl && settings.qrCodeUrl.startsWith('/uploads/')) {
+      settings.qrCodeUrl = buildUploadUrl(settings.qrCodeUrl.replace('/uploads/', ''));
+    }
+
     res.json({ success: true, settings });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -40,8 +57,7 @@ export const uploadQR = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'No image provided' });
     }
     
-    // Convert path to URL
-    const qrImageUrl = `/uploads/${req.file.filename}`;
+    const qrImageUrl = buildUploadUrl(req.file.filename);
     
     let settings = await PaymentSettingsModel.findOne();
     if (!settings) {
