@@ -34,30 +34,32 @@ import { getClosedPositions } from './src/controllers/tradingController';
 console.log("MONGO URI =", process.env.MONGODB_URI);
 
 const app = express();
-const allowedOrigins = (process.env.FRONTEND_URL ?? 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174')
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl requests)
+    console.log(`[CORS] Incoming Origin: ${origin || 'No Origin'}`);
+    
+    // Allow requests with no origin (like mobile apps, Postman, curl)
     if (!origin) {
-      callback(null, true);
-      return;
+      return callback(null, true);
     }
 
     if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-      return;
+      console.log(`[CORS] Allowed Origin: ${origin}`);
+      return callback(null, true);
     }
 
-    console.warn(`CORS blocked origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`);
-    callback(null, true); // Temporarily allow to debug - change to callback(new Error(...)) for production
+    console.warn(`[CORS] Rejected Origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`);
+    // Reject unknown origins in production instead of blindly allowing them
+    return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
