@@ -98,8 +98,12 @@ app.use(errorHandler);
 const server = http.createServer(app);
 SocketServer.init(server);
 
+import { SymbolSpecification } from './src/engine/SymbolSpecification';
+
 const start = async () => {
   await connectDatabase();
+  await SymbolSpecification.loadAll();
+  console.log('[Startup] Symbol specifications loaded.');
   const PORT = Number(process.env.PORT) || 8000;
   server.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
