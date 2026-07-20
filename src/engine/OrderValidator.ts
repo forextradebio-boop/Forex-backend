@@ -22,7 +22,7 @@ export class OrderValidator {
 
     const spec = SymbolSpecification.getSync(symbol);
 
-    if (!spec || !spec.isActive) {
+    if (!spec || spec.status === 'CLOSED' || spec.status === 'MAINTENANCE' || !spec.tradingEnabled) {
       throw new Error('Disabled Symbol');
     }
 
