@@ -52,8 +52,8 @@ app.use(cors({
       return;
     }
 
-  console.warn(`CORS blocked origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`);
-  callback(null, true); // Temporarily allow to debug - change to callback(new Error(...)) for production
+    console.warn(`CORS blocked origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`);
+    callback(null, true); // Temporarily allow to debug - change to callback(new Error(...)) for production
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -65,6 +65,7 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Serve uploaded files statically
 import path from 'path';
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+app.use('/api/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Register API routes
 app.use('/api/auth', authRoutes);
@@ -99,7 +100,7 @@ const start = async () => {
   await connectDatabase();
   const PORT = Number(process.env.PORT) || 8000;
   server.listen(PORT, () => {
-    console.log(🚀 Server running on port ${PORT});
+    console.log(`🚀 Server running on port ${PORT}`);
     PriceEngine.start();
   });
 };
