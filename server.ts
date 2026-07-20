@@ -34,27 +34,42 @@ import { getClosedPositions } from './src/controllers/tradingController';
 console.log("MONGO URI =", process.env.MONGODB_URI);
 
 const app = express();
-const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174,https://www.novaf.in,https://novaf.in,https://www.novaf.online,https://novaf.online,https://forex-frontend-2dmzc8t8z-forextradebio-boops-projects.vercel.app')
+const defaultAllowedOrigins = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'https://www.novaf.in',
+  'https://novaf.in',
+  'https://www.novaf.online',
+  'https://novaf.online',
+  'https://forex-factory-admin-panel.vercel.app',
+  'https://forex-backend-iem1.onrender.com',
+  'https://forex-backend-63xj.onrender.com',
+  'https://forex-frontend-2dmzc8t8z-forextradebio-boops-projects.vercel.app'
+];
+const envOrigins = (process.env.FRONTEND_URL || process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
+const allowedOrigins = [...new Set([...defaultAllowedOrigins, ...envOrigins])];
+const isAllowedOrigin = (origin: string | undefined) => {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  if (/\.vercel\.app$/i.test(origin) || /\.onrender\.com$/i.test(origin)) return true;
+  return false;
+};
 
 app.use(cors({
   origin: (origin, callback) => {
     console.log(`[CORS] Incoming Origin: ${origin || 'No Origin'}`);
-    
-    // Allow requests with no origin (like mobile apps, Postman, curl)
-    if (!origin) {
-      return callback(null, true);
-    }
 
-    if (allowedOrigins.includes(origin)) {
+    if (isAllowedOrigin(origin)) {
       console.log(`[CORS] Allowed Origin: ${origin}`);
       return callback(null, true);
     }
 
     console.warn(`[CORS] Rejected Origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`);
-    // Reject unknown origins in production instead of blindly allowing them
     return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
