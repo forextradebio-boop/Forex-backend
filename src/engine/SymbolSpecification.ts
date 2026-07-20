@@ -116,7 +116,8 @@ export class SymbolSpecification {
       lotStep: 0.01,
       leverageLimit,
       spread: 1,
-      isActive: true
+      status: 'OPEN',
+      tradingEnabled: true
     };
   }
 }
