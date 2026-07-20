@@ -50,7 +50,7 @@ export class OrderExecutionEngine {
         }
 
         const sym = await SymbolModel.findOne({ symbol: order.symbol.toUpperCase() });
-        if (!sym || !sym.isActive) {
+        if (!sym || sym.status === 'CLOSED' || sym.status === 'MAINTENANCE' || !sym.tradingEnabled) {
           order.status = 'CANCELLED';
           await order.save();
           await AuditLogModel.create({ action: 'ORDER_CANCELLED', details: { orderId: order._id, reason: 'SYMBOL_INACTIVE' } });
