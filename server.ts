@@ -52,8 +52,8 @@ app.use(cors({
       return;
     }
 
-    console.warn(CORS blocked origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')});
-    callback(null, true); // Temporarily allow to debug - change to callback(new Error(...)) for production
+  console.warn(`CORS blocked origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`);
+  callback(null, true); // Temporarily allow to debug - change to callback(new Error(...)) for production
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
