@@ -10,7 +10,7 @@ export class SocketServer {
       return this.io;
     }
 
-    const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174')
+    const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174,https://www.novaf.in,https://novaf.in,https://www.novaf.online,https://novaf.online,https://forex-frontend-2dmzc8t8z-forextradebio-boops-projects.vercel.app')
       .split(',')
       .map((origin) => origin.trim())
       .filter(Boolean);
