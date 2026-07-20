@@ -388,7 +388,9 @@ export const createSymbol = async (req: Request, res: Response) => {
       price: Number(price),
       leverageLimit: Number(leverageLimit),
       spread: Number(spread),
-      isActive: true,
+      status: 'OPEN',
+      tradingEnabled: true,
+      visibleToUsers: true,
     });
 
     await logAdminAction((req as any).user.id, 'CREATE_SYMBOL', { symbol: normalized });
