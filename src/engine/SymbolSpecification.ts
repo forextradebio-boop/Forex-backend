@@ -58,6 +58,15 @@ export class SymbolSpecification {
   private static applyLeverageOverrides(symInfo: ISymbol | Partial<ISymbol>): ISymbol | Partial<ISymbol> {
     const sym = symInfo.symbol?.toUpperCase();
     if (!sym) return symInfo;
+
+    // Ensure status and tradingEnabled always have safe defaults
+    // Old seed scripts and createSymbol used `isActive` instead of these fields
+    if (!symInfo.status) {
+      symInfo.status = (symInfo as any).isActive === false ? 'CLOSED' : 'OPEN';
+    }
+    if (symInfo.tradingEnabled === undefined || symInfo.tradingEnabled === null) {
+      symInfo.tradingEnabled = (symInfo as any).isActive !== false;
+    }
     
     // If it's using the old 100 default, upgrade it for MT5 standards
     if (symInfo.leverageLimit === 100) {
