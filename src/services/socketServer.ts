@@ -10,12 +10,29 @@ export class SocketServer {
       return this.io;
     }
 
+    const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+
     this.io = new Server(server, {
       cors: {
-        origin: true,
-        methods: ['GET', 'POST'],
+        origin: (origin, callback) => {
+          // Allow requests with no origin (like mobile apps)
+          if (!origin) {
+            return callback(null, true);
+          }
+          if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+          }
+          console.warn(`[Socket.IO CORS] Rejected Origin: ${origin}`);
+          return callback(new Error('Not allowed by CORS'));
+        },
+        methods: ['GET', 'POST', 'OPTIONS'],
         credentials: true,
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
       },
+      transports: ['websocket', 'polling'],
       pingInterval: 25000,
       pingTimeout: 20000,
     });
