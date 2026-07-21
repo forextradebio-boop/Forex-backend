@@ -29,87 +29,70 @@ export const getDepositById = async (req: Request, res: Response) => {
 };
 
 export const approveDeposit = async (req: Request, res: Response) => {
-  let retries = 3;
-  while (retries > 0) {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    try {
-      const { id } = req.params;
-      const { remarks, customExchangeRate } = req.body;
-      const adminId = (req as any).user.id;
-      
-      const deposit = await DepositModel.findById(id).session(session);
-      
-      if (!deposit) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(404).json({ success: false, error: 'Deposit not found' });
-      }
-      
-      if (deposit.status === 'APPROVED') {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({ success: false, error: 'Deposit is already approved' });
-      }
-
-      if (deposit.status === 'REJECTED') {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({ success: false, error: 'Deposit is already rejected' });
-      }
-
-      deposit.status = 'APPROVED';
-      deposit.remarks = remarks || deposit.remarks;
-      deposit.approvedBy = adminId;
-      deposit.approvedAt = new Date();
-      await deposit.save({ session });
-
-      const wallet = await WalletModel.findOne({ userId: deposit.userId }).session(session);
-      if (wallet) {
-        const exchangeRateDoc = await ExchangeRateModel.findOne({ isActive: true }).session(session);
-        const rate = customExchangeRate ? Number(customExchangeRate) : (exchangeRateDoc ? exchangeRateDoc.currentRate : 85);
-        const amountInUSD = deposit.amount / rate;
-
-        deposit.exchangeRate = rate;
-        deposit.creditedUSD = amountInUSD;
-        await deposit.save({ session });
-
-        wallet.balance += amountInUSD;
-        wallet.equity = wallet.balance + (wallet.pnl || 0);
-        wallet.freeMargin = wallet.equity - (wallet.margin || 0);
-        await wallet.save({ session });
-
-        await TransactionModel.create([{
-          userId: deposit.userId,
-          type: 'DEPOSIT',
-          amount: amountInUSD,
-          balanceAfter: wallet.balance,
-          status: 'APPROVED',
-          referenceId: (deposit as any)._id.toString(),
-          description: `Deposit Approved by Admin${remarks ? ' - ' + remarks : ''}`
-        }], { session });
-      }
-
-      await AuditLogModel.create([{ adminId, action: 'APPROVE_DEPOSIT', details: { depositId: id, remarks } }], { session });
-      await NotificationModel.create([{ userId: deposit.userId, title: 'Deposit Approved', message: `Your deposit of ${deposit.currency} ${deposit.amount} has been approved.`, type: 'SUCCESS' }], { session });
-
-      await session.commitTransaction();
-      session.endSession();
-      
-      // Broadcast transaction event to update UI
-      SocketServer.broadcastTransactionUpdate(deposit.userId.toString());
-
-      return res.json({ success: true, message: 'Deposit approved successfully', deposit });
-    } catch (error: any) {
-      await session.abortTransaction();
-      session.endSession();
-      if (error.hasErrorLabel && error.hasErrorLabel('TransientTransactionError') && retries > 1) {
-        retries--;
-        await new Promise(resolve => setTimeout(resolve, 500));
-        continue;
-      }
-      return res.status(500).json({ success: false, error: error.message });
+  try {
+    const { id } = req.params;
+    const { remarks, customExchangeRate } = req.body;
+    const adminId = (req as any).user.id;
+    
+    const deposit = await DepositModel.findById(id);
+    
+    if (!deposit) {
+      return res.status(404).json({ success: false, error: 'Deposit not found' });
     }
+    
+    if (deposit.status === 'APPROVED') {
+      return res.status(400).json({ success: false, error: 'Deposit is already approved' });
+    }
+
+    if (deposit.status === 'REJECTED') {
+      return res.status(400).json({ success: false, error: 'Deposit is already rejected' });
+    }
+
+    deposit.status = 'APPROVED';
+    deposit.remarks = remarks || deposit.remarks;
+    deposit.approvedBy = adminId;
+    deposit.approvedAt = new Date();
+
+    const wallet = await WalletModel.findOne({ userId: deposit.userId });
+    let amountInUSD = 0;
+    
+    if (wallet) {
+      const exchangeRateDoc = await ExchangeRateModel.findOne({ isActive: true });
+      const rate = customExchangeRate ? Number(customExchangeRate) : (exchangeRateDoc ? exchangeRateDoc.currentRate : 85);
+      amountInUSD = deposit.amount / rate;
+
+      deposit.exchangeRate = rate;
+      deposit.creditedUSD = amountInUSD;
+
+      wallet.balance += amountInUSD;
+      wallet.equity = wallet.balance + (wallet.pnl || 0);
+      wallet.freeMargin = wallet.equity - (wallet.margin || 0);
+      await wallet.save();
+    }
+
+    await deposit.save();
+
+    if (wallet) {
+      await TransactionModel.create({
+        userId: deposit.userId,
+        type: 'DEPOSIT',
+        amount: amountInUSD,
+        balanceAfter: wallet.balance,
+        status: 'APPROVED',
+        referenceId: (deposit as any)._id.toString(),
+        description: `Deposit Approved by Admin${remarks ? ' - ' + remarks : ''}`
+      });
+    }
+
+    await AuditLogModel.create({ adminId, action: 'APPROVE_DEPOSIT', details: { depositId: id, remarks } });
+    await NotificationModel.create({ userId: deposit.userId, title: 'Deposit Approved', message: `Your deposit of ${deposit.currency || 'USD'} ${deposit.amount} has been approved.`, type: 'SUCCESS' });
+
+    // Broadcast transaction event to update UI
+    SocketServer.broadcastTransactionUpdate(deposit.userId.toString());
+
+    return res.json({ success: true, message: 'Deposit approved successfully', deposit });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
   }
 };
 
