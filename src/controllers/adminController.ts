@@ -129,6 +129,7 @@ export const approveWithdrawal = async (req: Request, res: Response) => {
         type: 'WITHDRAWAL',
         amount: withdrawal.amount,
         balanceAfter: wallet.balance,
+        status: 'APPROVED',
         description: 'Withdrawal Approved'
       });
     }
