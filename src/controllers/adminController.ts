@@ -275,20 +275,20 @@ export const clearUserHistory = async (req: Request, res: Response) => {
 export const getSymbols = async (req: Request, res: Response) => {
   try {
     const symbols = await SymbolModel.find().lean();
-    
+
     // Aggregate open positions by symbol
     const activePositions = await PositionModel.aggregate([
       { $match: { status: 'OPEN' } },
       { $group: { _id: '$symbol', count: { $sum: 1 } } }
     ]);
     const positionsMap = new Map(activePositions.map(p => [p._id, p.count]));
-    
+
     const enrichedSymbols = symbols.map(s => ({
       ...s,
       openPositions: positionsMap.get(s.symbol) || 0,
       connectedUsers: Math.floor(Math.random() * 50) + 10 // Mocked for now
     }));
-    
+
     res.json({ symbols: enrichedSymbols });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -299,10 +299,10 @@ export const updateSymbolStatus = async (req: Request, res: Response) => {
   try {
     const { symbol } = req.params;
     const { status, visibleToUsers, tradingEnabled, spread, leverageLimit } = req.body;
-    
+
     const targetSymbol = await SymbolModel.findOne({ symbol: symbol.toUpperCase() });
     if (!targetSymbol) return res.status(404).json({ error: 'Symbol not found' });
-    
+
     const oldStatus = targetSymbol.status;
     if (status) targetSymbol.status = status;
     if (visibleToUsers !== undefined) targetSymbol.visibleToUsers = visibleToUsers;
@@ -311,7 +311,7 @@ export const updateSymbolStatus = async (req: Request, res: Response) => {
     if (leverageLimit !== undefined) targetSymbol.leverageLimit = leverageLimit;
 
     await targetSymbol.save();
-    
+
     const { SymbolSpecification } = await import('../engine/SymbolSpecification');
     await SymbolSpecification.loadAll();
 
@@ -324,10 +324,10 @@ export const updateSymbolStatus = async (req: Request, res: Response) => {
       spread: targetSymbol.spread
     }]);
 
-    await logAdminAction((req as any).user.id, 'UPDATE_SYMBOL', { 
-      symbol, 
-      oldStatus, 
-      newStatus: targetSymbol.status 
+    await logAdminAction((req as any).user.id, 'UPDATE_SYMBOL', {
+      symbol,
+      oldStatus,
+      newStatus: targetSymbol.status
     });
 
     res.json({ success: true, symbol: targetSymbol });
@@ -344,12 +344,12 @@ export const getUserDetails = async (req: Request, res: Response) => {
 
     const wallet = await WalletModel.findOne({ userId: id });
     const kyc = await KycModel.findOne({ userId: id });
-    
+
     // Fetch only non-deleted financial records
     const deposits = await DepositModel.find({ userId: id, isDeleted: false }).sort({ createdAt: -1 });
     const withdrawals = await WithdrawalModel.find({ userId: id, isDeleted: false }).sort({ createdAt: -1 });
     const transactions = await TransactionModel.find({ userId: id, isDeleted: false }).sort({ createdAt: -1 });
-    
+
     const { TradeHistoryModel } = await import('../models/TradeHistory');
     const trades = await TradeHistoryModel.find({ userId: id, isDeleted: false }).sort({ createdAt: -1 });
     const openPositions = await PositionModel.find({ userId: id, status: 'OPEN' });
@@ -420,7 +420,7 @@ export const modifySymbol = async (req: Request, res: Response) => {
   try {
     const symbolCode = String(req.params.symbol || '').toUpperCase();
     const { leverageLimit, spread, minLot, maxLot, lotStep } = req.body;
-    
+
     const symbol = await SymbolModel.findOne({ symbol: symbolCode });
     if (!symbol) return res.status(404).json({ error: 'Symbol not found' });
 
@@ -429,7 +429,7 @@ export const modifySymbol = async (req: Request, res: Response) => {
     if (minLot !== undefined) symbol.minLot = Number(minLot);
     if (maxLot !== undefined) symbol.maxLot = Number(maxLot);
     if (lotStep !== undefined) symbol.lotStep = Number(lotStep);
-    
+
     await symbol.save();
     await logAdminAction((req as any).user.id, 'MODIFY_SYMBOL', { symbol: symbolCode, updates: req.body });
     res.json(symbol);
@@ -500,10 +500,10 @@ export const forceCloseTrade = async (req: Request, res: Response) => {
 
     const { MarketService } = await import('../services/market.service');
     const { TradeUtils } = await import('../services/tradeUtils');
-    
+
     position.status = 'CLOSED';
     position.closePrice = price ? Number(price) : position.currentPrice;
-    
+
     position.pnl = TradeUtils.calculatePnl(
       position.type,
       position.openPrice,
@@ -577,18 +577,18 @@ export const updatePlatformTradingStatus = async (req: Request, res: Response) =
   try {
     const { MarketSettingsModel } = await import('../models/MarketSettings');
     let settings = await MarketSettingsModel.findOne() || await MarketSettingsModel.create({});
-    
+
     settings.globalTradingStatus = req.body.status;
     settings.lastUpdatedBy = (req as any).user?._id;
     settings.reason = req.body.reason;
     await settings.save();
-    
+
     const { getSocketServer } = await import('../socket');
     const io = getSocketServer();
     if (io) {
       io.emit('PLATFORM_STATUS_UPDATED', settings);
     }
-    
+
     res.json(settings);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -599,18 +599,18 @@ export const updatePlatformGraphStatus = async (req: Request, res: Response) => 
   try {
     const { MarketSettingsModel } = await import('../models/MarketSettings');
     let settings = await MarketSettingsModel.findOne() || await MarketSettingsModel.create({});
-    
+
     settings.globalGraphStatus = req.body.status;
     settings.lastUpdatedBy = (req as any).user?._id;
     settings.reason = req.body.reason;
     await settings.save();
-    
+
     const { getSocketServer } = await import('../socket');
     const io = getSocketServer();
     if (io) {
       io.emit('PLATFORM_STATUS_UPDATED', settings);
     }
-    
+
     res.json(settings);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -621,18 +621,18 @@ export const updatePlatformMarketStatus = async (req: Request, res: Response) =>
   try {
     const { MarketSettingsModel } = await import('../models/MarketSettings');
     let settings = await MarketSettingsModel.findOne() || await MarketSettingsModel.create({});
-    
+
     settings.globalMarketStatus = req.body.status;
     settings.lastUpdatedBy = (req as any).user?._id;
     settings.reason = req.body.reason;
     await settings.save();
-    
+
     const { getSocketServer } = await import('../socket');
     const io = getSocketServer();
     if (io) {
       io.emit('PLATFORM_STATUS_UPDATED', settings);
     }
-    
+
     res.json(settings);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -642,7 +642,7 @@ export const updatePlatformMarketStatus = async (req: Request, res: Response) =>
 export const getAllTrades = async (req: Request, res: Response) => {
   try {
     const { OrderModel } = await import('../models/Order');
-    
+
     // Fetch all open positions, closed positions, and pending orders
     const [openPositions, closedPositions, pendingOrders] = await Promise.all([
       PositionModel.find({ status: 'OPEN' }).populate('userId', 'fullName email'),
@@ -746,7 +746,7 @@ export const archiveRecord = async (req: Request, res: Response) => {
 
     record.isArchived = true;
     await record.save();
-    
+
     await logAdminAction((req as any).user?.id, `ARCHIVE_RECORD_${type.toUpperCase()}`, { recordId: id });
     res.json(record);
   } catch (error: any) {
@@ -767,7 +767,7 @@ export const restoreRecord = async (req: Request, res: Response) => {
     record.isDeleted = false;
     record.deletedAt = undefined;
     await record.save();
-    
+
     await logAdminAction((req as any).user?.id, `RESTORE_RECORD_${type.toUpperCase()}`, { recordId: id });
     res.json(record);
   } catch (error: any) {
@@ -787,7 +787,7 @@ export const softDeleteRecord = async (req: Request, res: Response) => {
     record.isDeleted = true;
     record.deletedAt = new Date();
     await record.save();
-    
+
     await logAdminAction((req as any).user?.id, `SOFT_DELETE_RECORD_${type.toUpperCase()}`, { recordId: id });
     res.json({ success: true, record });
   } catch (error: any) {
@@ -807,7 +807,7 @@ export const hardDeleteRecord = async (req: Request, res: Response) => {
     if (!model) return res.status(400).json({ error: 'Invalid record type' });
 
     await (model as any).findByIdAndDelete(id);
-    
+
     await logAdminAction(adminUser.id, `HARD_DELETE_RECORD_${type.toUpperCase()}`, { recordId: id });
     res.json({ success: true });
   } catch (error: any) {
