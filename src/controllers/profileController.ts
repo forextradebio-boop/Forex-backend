@@ -47,7 +47,7 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response): P
       return;
     }
 
-    const { name, phone, country, avatar } = req.body;
+    const { name, phone, country, avatar, email } = req.body;
 
     // Validate types if they exist
     if (name && typeof name !== 'string') {
@@ -66,12 +66,17 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response): P
       res.status(400).json({ message: 'Validation Error: avatar must be string' });
       return;
     }
+    if (email && typeof email !== 'string') {
+      res.status(400).json({ message: 'Validation Error: email must be string' });
+      return;
+    }
 
     const updateFields: any = {};
     if (name) updateFields.fullName = name;
     if (phone !== undefined) updateFields.phone = phone;
     if (country !== undefined) updateFields.country = country;
     if (avatar !== undefined) updateFields.avatar = avatar;
+    if (email !== undefined) updateFields.email = email;
 
     const updatedUser = await UserModel.findByIdAndUpdate(
       user._id,
