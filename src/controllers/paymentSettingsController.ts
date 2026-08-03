@@ -40,12 +40,19 @@ export const getPaymentSettings = async (req: Request, res: Response) => {
 
 export const updatePaymentSettings = async (req: Request, res: Response) => {
   try {
-    const updates = req.body;
+    const updates = { ...req.body };
+    const existingSettings = await PaymentSettingsModel.findOne();
+
     if ((req as any).user && (req as any).user.id) {
       updates.updatedBy = (req as any).user.id;
     }
 
-    let settings = await PaymentSettingsModel.findOne();
+    if (existingSettings) {
+      if (updates.qrImage === undefined) updates.qrImage = existingSettings.qrImage || '';
+      if (updates.qrCodeUrl === undefined) updates.qrCodeUrl = existingSettings.qrCodeUrl || '';
+    }
+
+    let settings = existingSettings;
     if (!settings) {
       settings = await PaymentSettingsModel.create(updates);
     } else {
@@ -59,11 +66,12 @@ export const updatePaymentSettings = async (req: Request, res: Response) => {
 
 export const uploadQR = async (req: Request, res: Response) => {
   try {
-    if (!req.file) {
+    const uploadedFile = (req as any).file;
+    if (!uploadedFile) {
       return res.status(400).json({ success: false, error: 'No image provided' });
     }
     
-    const qrImageUrl = buildUploadUrl(req.file.filename);
+    const qrImageUrl = buildUploadUrl(uploadedFile.filename);
     
     let settings = await PaymentSettingsModel.findOne();
     if (!settings) {
