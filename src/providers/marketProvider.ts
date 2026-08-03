@@ -314,6 +314,110 @@ export class MarketProvider {
 
     const rapidApiSymbol = SymbolMapper.getProviderSymbol(normalized);
 
+    const isGoldSymbol = ['XAUUSD', 'XAGUSD'].includes(normalized);
+
+    const fallbackUrl = isGoldSymbol
+      ? `https://query2.finance.yahoo.com/v8/finance/chart/${rapidApiSymbol}`
+      : `https://query1.finance.yahoo.com/v8/finance/chart/${rapidApiSymbol}`;
+
+
+
+    try {
+
+      const response = await axios.get(fallbackUrl, {
+
+        params: { interval: '1m', range: '1d' },
+
+        headers: {
+
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+
+          Accept: 'application/json',
+
+        },
+
+        timeout: 10000,
+
+      });
+
+
+
+      const chartResult = response.data?.chart?.result?.[0];
+
+      const meta = chartResult?.meta;
+
+      const quote = chartResult?.indicators?.quote?.[0];
+
+      const price = Number(meta?.regularMarketPrice ?? quote?.close?.slice(-1)?.[0]);
+
+
+
+      if (!Number.isFinite(price) || price <= 0) {
+
+        throw new Error('Invalid Yahoo quote response');
+
+      }
+
+
+
+      const previousClose = Number(meta?.chartPreviousClose ?? price);
+
+      const bid = Number(meta?.regularMarketBid ?? price);
+
+      const ask = Number(meta?.regularMarketAsk ?? price);
+
+      const spread = Math.max(ask - bid, 0);
+
+      const high = Number(meta?.regularMarketDayHigh ?? quote?.high?.slice(-1)?.[0] ?? price);
+
+      const low = Number(meta?.regularMarketDayLow ?? quote?.low?.slice(-1)?.[0] ?? price);
+
+      const open = Number(meta?.regularMarketOpen ?? quote?.open?.slice(-1)?.[0] ?? price);
+
+      const volume = Number(meta?.regularMarketVolume ?? quote?.volume?.slice(-1)?.[0] ?? 0);
+
+
+
+      return {
+
+        symbol: normalized,
+
+        price,
+
+        bid,
+
+        ask,
+
+        spread,
+
+        high,
+
+        low,
+
+        open,
+
+        previousClose,
+
+        change: price - previousClose,
+
+        changePercent: previousClose ? ((price - previousClose) / previousClose) * 100 : 0,
+
+        category: SymbolMapper.getCategory(normalized),
+
+        marketStatus: meta?.exchangeTimezoneName ? 'OPEN' : 'UNKNOWN',
+
+        volume: Number.isFinite(volume) ? volume : 0,
+
+        timestamp: Date.now(),
+
+      };
+
+    } catch (error: any) {
+
+      console.warn(`[MarketProvider] Yahoo fallback failed for ${normalized}: ${error.message}`);
+
+    }
+
 
 
     const data = await this.client.get<any>(`/v8/finance/chart/${rapidApiSymbol}`, {
