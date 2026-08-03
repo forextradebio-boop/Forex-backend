@@ -9,8 +9,9 @@ export const createDeposit = async (req: Request, res: Response) => {
     const { amount, currency = 'USD', paymentMethod = 'UPI', utr } = req.body;
     let screenshot = req.body.screenshot || '';
     
-    if (req.file) {
-      screenshot = `/uploads/${req.file.filename}`;
+    const uploadedFile = (req as any).file;
+    if (uploadedFile) {
+      screenshot = `/uploads/${uploadedFile.filename}`;
     }
     
     if (!amount || amount <= 0) {
