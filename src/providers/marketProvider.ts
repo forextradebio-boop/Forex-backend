@@ -76,6 +76,144 @@ export class MarketProvider {
 
 
 
+  private static getGoldApiKey(): string {
+
+    return process.env.GOLDAPI_KEY || process.env.GOLD_API_KEY || '';
+
+  }
+
+
+
+  private static getGoldApiBaseUrl(): string {
+
+    return process.env.GOLDAPI_URL || process.env.GOLD_API_URL || 'https://www.goldapi.io/api';
+
+  }
+
+
+
+  private static async tryGoldApiQuote(symbol: string): Promise<QuotePayload | null> {
+
+    const normalized = this.normalizeSymbol(symbol);
+
+    if (!['XAUUSD', 'XAGUSD'].includes(normalized)) {
+
+      return null;
+
+    }
+
+
+
+    const goldApiKey = this.getGoldApiKey();
+
+    if (!goldApiKey) {
+
+      return null;
+
+    }
+
+
+
+    const pathSymbol = normalized === 'XAUUSD' ? 'XAU/USD' : 'XAG/USD';
+
+    const goldApiBaseUrl = this.getGoldApiBaseUrl();
+
+
+
+    try {
+
+      const response = await axios.get(`${goldApiBaseUrl}/${pathSymbol}`, {
+
+        headers: {
+
+          'x-access-token': goldApiKey,
+
+          Accept: 'application/json',
+
+        },
+
+        timeout: 10000,
+
+      });
+
+
+
+      const payload = response.data || {};
+
+      const price = Number(payload?.price ?? payload?.price_usd ?? payload?.priceUSD ?? payload?.price_gram_24k);
+
+
+
+      if (!Number.isFinite(price) || price <= 0) {
+
+        throw new Error('Invalid GoldAPI quote response');
+
+      }
+
+
+
+      const bid = Number(payload?.bid ?? price);
+
+      const ask = Number(payload?.ask ?? price);
+
+      const previousClose = Number(payload?.prev_close ?? payload?.previousClose ?? price);
+
+      const high = Number(payload?.high ?? price);
+
+      const low = Number(payload?.low ?? price);
+
+      const open = Number(payload?.open ?? price);
+
+      const volume = Number(payload?.volume ?? 0);
+
+
+
+      return {
+
+        symbol: normalized,
+
+        price,
+
+        bid,
+
+        ask,
+
+        spread: Math.max(ask - bid, 0),
+
+        high,
+
+        low,
+
+        open,
+
+        previousClose,
+
+        change: price - previousClose,
+
+        changePercent: previousClose ? ((price - previousClose) / previousClose) * 100 : 0,
+
+        category: SymbolMapper.getCategory(normalized),
+
+        marketStatus: payload?.timestamp ? 'OPEN' : 'UNKNOWN',
+
+        volume: Number.isFinite(volume) ? volume : 0,
+
+        timestamp: Date.now(),
+
+      };
+
+    } catch (error: any) {
+
+      console.warn(`[MarketProvider] GoldAPI failed for ${normalized}: ${error.message}`);
+
+      return null;
+
+    }
+
+  }
+
+
+
   private static isValidCandle(candle: any): candle is CandlePoint {
 
     const time = Number(candle?.time);
@@ -164,113 +302,29 @@ export class MarketProvider {
 
     const normalized = this.normalizeSymbol(symbol);
 
-    const rapidApiSymbol = SymbolMapper.getProviderSymbol(normalized);
+    const goldApiQuote = await this.tryGoldApiQuote(normalized);
 
+    if (goldApiQuote) {
 
-
-    const tryPrimary = async () => {
-
-      const data = await this.client.get<any>(`/v8/finance/chart/${rapidApiSymbol}`, {
-
-        params: { interval: '1m', range: '1d' },
-
-      });
-
-
-
-      const chartResult = data?.chart?.result?.[0];
-
-      const meta = chartResult?.meta;
-
-      const quote = chartResult?.indicators?.quote?.[0];
-
-      const price = Number(meta?.regularMarketPrice ?? quote?.close?.slice(-1)?.[0]);
-
-
-
-      if (!Number.isFinite(price) || price <= 0) {
-
-        throw new Error('Invalid RapidAPI quote response');
-
-      }
-
-
-
-      return {
-
-        symbol: normalized,
-
-        price,
-
-        bid: Number(meta?.regularMarketBid ?? price),
-
-        ask: Number(meta?.regularMarketAsk ?? price),
-
-        spread: Math.max(Number(meta?.regularMarketAsk ?? price) - Number(meta?.regularMarketBid ?? price), 0),
-
-        high: Number(meta?.regularMarketDayHigh ?? quote?.high?.slice(-1)?.[0] ?? price),
-
-        low: Number(meta?.regularMarketDayLow ?? quote?.low?.slice(-1)?.[0] ?? price),
-
-        open: Number(meta?.regularMarketOpen ?? quote?.open?.slice(-1)?.[0] ?? price),
-
-        previousClose: Number(meta?.chartPreviousClose ?? price),
-
-        change: price - Number(meta?.chartPreviousClose ?? price),
-
-        changePercent: Number(meta?.chartPreviousClose ?? price)
-
-          ? ((price - Number(meta?.chartPreviousClose ?? price)) / Number(meta?.chartPreviousClose ?? price)) * 100
-
-          : 0,
-
-        category: SymbolMapper.getCategory(normalized),
-
-        marketStatus: meta?.exchangeTimezoneName ? 'OPEN' : 'UNKNOWN',
-
-        volume: Number(meta?.regularMarketVolume ?? quote?.volume?.slice(-1)?.[0] ?? 0),
-
-        timestamp: Date.now(),
-
-      };
-
-    };
-
-
-
-    try {
-
-      return await tryPrimary();
-
-    } catch (error: any) {
-
-      console.warn(`[MarketProvider] Primary quote provider failed for ${normalized} (${rapidApiSymbol}): ${error.message}. Falling back to Yahoo Finance.`);
+      return goldApiQuote;
 
     }
 
 
 
-    const fallbackUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${rapidApiSymbol}`;
+    const rapidApiSymbol = SymbolMapper.getProviderSymbol(normalized);
 
-    const fallbackResponse = await axios.get(fallbackUrl, {
+
+
+    const data = await this.client.get<any>(`/v8/finance/chart/${rapidApiSymbol}`, {
 
       params: { interval: '1m', range: '1d' },
-
-      headers: {
-
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-
-        'Accept': 'application/json',
-
-      },
-
-      timeout: 10000,
 
     });
 
 
 
-    const chartResult = fallbackResponse.data?.chart?.result?.[0];
+    const chartResult = data?.chart?.result?.[0];
 
     const meta = chartResult?.meta;
 
@@ -282,49 +336,67 @@ export class MarketProvider {
 
     if (!Number.isFinite(price) || price <= 0) {
 
-      throw new Error('Invalid Yahoo Finance quote response');
+      throw new Error('Invalid RapidAPI quote response');
 
     }
 
 
 
-    return {
+    const previousClose = Number(meta?.chartPreviousClose ?? price);
+
+    const bid = Number(meta?.regularMarketBid ?? price);
+
+    const ask = Number(meta?.regularMarketAsk ?? price);
+
+    const spread = Math.max(ask - bid, 0);
+
+    const high = Number(meta?.regularMarketDayHigh ?? quote?.high?.slice(-1)?.[0] ?? price);
+
+    const low = Number(meta?.regularMarketDayLow ?? quote?.low?.slice(-1)?.[0] ?? price);
+
+    const open = Number(meta?.regularMarketOpen ?? quote?.open?.slice(-1)?.[0] ?? price);
+
+    const volume = Number(meta?.regularMarketVolume ?? quote?.volume?.slice(-1)?.[0] ?? 0);
+
+
+
+    const parsedObject = {
 
       symbol: normalized,
 
       price,
 
-      bid: Number(meta?.regularMarketBid ?? price),
+      bid,
 
-      ask: Number(meta?.regularMarketAsk ?? price),
+      ask,
 
-      spread: Math.max(Number(meta?.regularMarketAsk ?? price) - Number(meta?.regularMarketBid ?? price), 0),
+      spread,
 
-      high: Number(meta?.regularMarketDayHigh ?? quote?.high?.slice(-1)?.[0] ?? price),
+      high,
 
-      low: Number(meta?.regularMarketDayLow ?? quote?.low?.slice(-1)?.[0] ?? price),
+      low,
 
-      open: Number(meta?.regularMarketOpen ?? quote?.open?.slice(-1)?.[0] ?? price),
+      open,
 
-      previousClose: Number(meta?.chartPreviousClose ?? price),
+      previousClose,
 
-      change: price - Number(meta?.chartPreviousClose ?? price),
+      change: price - previousClose,
 
-      changePercent: Number(meta?.chartPreviousClose ?? price)
-
-        ? ((price - Number(meta?.chartPreviousClose ?? price)) / Number(meta?.chartPreviousClose ?? price)) * 100
-
-        : 0,
+      changePercent: previousClose ? ((price - previousClose) / previousClose) * 100 : 0,
 
       category: SymbolMapper.getCategory(normalized),
 
       marketStatus: meta?.exchangeTimezoneName ? 'OPEN' : 'UNKNOWN',
 
-      volume: Number(meta?.regularMarketVolume ?? quote?.volume?.slice(-1)?.[0] ?? 0),
+      volume: Number.isFinite(volume) ? volume : 0,
 
       timestamp: Date.now(),
 
     };
+
+
+
+    return parsedObject;
 
   }
 
@@ -817,4 +889,3 @@ export class MarketProvider {
   }
 
 }
-
