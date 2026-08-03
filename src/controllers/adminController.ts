@@ -15,13 +15,17 @@ import { MarginEngine } from '../services/marginEngine';
 import { SocketServer } from '../services/socketServer';
 import { ExchangeRateModel } from '../models/ExchangeRate';
 
-const buildPublicUploadUrl = (value?: string) => {
+const buildPublicUploadUrl = (value?: string, request?: Request) => {
   if (!value || typeof value !== 'string') return value;
   const trimmed = value.trim();
   if (!trimmed) return value;
   if (/^data:image\//i.test(trimmed) || /^blob:/i.test(trimmed) || /^https?:\/\//i.test(trimmed)) return trimmed;
 
-  const baseUrl = (process.env.UPLOAD_BASE_URL || process.env.BACKEND_URL || 'http://localhost:8000').replace(/\/$/, '');
+  const envBaseUrl = (process.env.UPLOAD_BASE_URL || process.env.BACKEND_URL || '').replace(/\/$/, '');
+  const requestBaseUrl = request
+    ? `${request.protocol}://${request.get('host')}`.replace(/\/$/, '')
+    : '';
+  const baseUrl = (envBaseUrl || requestBaseUrl || 'http://localhost:8000').replace(/\/$/, '');
   const rootBase = baseUrl.replace(/\/api$/, '');
 
   if (trimmed.startsWith('/uploads/')) return `${rootBase}${trimmed}`;
@@ -265,16 +269,16 @@ export const getKycRequests = async (req: Request, res: Response) => {
       const rawDoc = kyc.toObject ? kyc.toObject() : kyc;
       const documents = Array.isArray(rawDoc.documents)
         ? rawDoc.documents.map((item: any) => {
-            if (typeof item === 'string') return buildPublicUploadUrl(item);
+            if (typeof item === 'string') return buildPublicUploadUrl(item, req);
             if (item && typeof item === 'object') {
-              return buildPublicUploadUrl(item.url || item.src || item.path || item.image || item.file || item.document || item.documentUrl || item.fileUrl);
+              return buildPublicUploadUrl(item.url || item.src || item.path || item.image || item.file || item.document || item.documentUrl || item.fileUrl, req);
             }
             return item;
           }).filter(Boolean)
         : [];
 
-      const frontImage = buildPublicUploadUrl(rawDoc.aadharDocument || rawDoc.frontImage || rawDoc.aadharDocumentUrl || rawDoc.aadharUrl || documents[0]);
-      const selfieImage = buildPublicUploadUrl(rawDoc.panDocument || rawDoc.selfieImage || rawDoc.panDocumentUrl || rawDoc.panUrl || documents[1]);
+      const frontImage = buildPublicUploadUrl(rawDoc.aadharDocument || rawDoc.frontImage || rawDoc.aadharDocumentUrl || rawDoc.aadharUrl || documents[0], req);
+      const selfieImage = buildPublicUploadUrl(rawDoc.panDocument || rawDoc.selfieImage || rawDoc.panDocumentUrl || rawDoc.panUrl || documents[1], req);
 
       return {
         ...rawDoc,
