@@ -247,14 +247,21 @@ export const uploadKycFiles = async (req: Request & { files?: any }, res: Respon
       return res.status(400).json({ success: false, error: 'No files uploaded' });
     }
 
-    // Build accessible URLs for saved files
-    const envBaseUrl = (process.env.UPLOAD_BASE_URL || process.env.BACKEND_URL || '').replace(/\/$/, '');
-    const requestBaseUrl = req ? `${req.protocol}://${req.get('host')}`.replace(/\/$/, '') : '';
-    const baseUrl = (envBaseUrl || requestBaseUrl || '').replace(/\/$/, '');
+    const getMimeType = (file: any) => {
+      if (file.mimetype && file.mimetype.startsWith('image/')) return file.mimetype;
+      const ext = path.extname(file.originalname || '').toLowerCase();
+      if (ext === '.png') return 'image/png';
+      if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+      if (ext === '.webp') return 'image/webp';
+      if (ext === '.gif') return 'image/gif';
+      return 'application/octet-stream';
+    };
+
     const fileUrls = files.map((f: any) => {
-      // Ensure forward slashes for URLs
-      const rel = path.relative(path.join(process.cwd(), 'uploads'), f.path).split(path.sep).join('/');
-      return baseUrl ? `${baseUrl}/uploads/${rel}` : `/uploads/${rel}`;
+      const fileBuffer = fs.readFileSync(f.path);
+      const mimeType = getMimeType(f);
+      const base64 = fileBuffer.toString('base64');
+      return `data:${mimeType};base64,${base64}`;
     });
 
     // If the request is authenticated, attach files to user's KYC document
