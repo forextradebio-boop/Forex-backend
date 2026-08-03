@@ -5,6 +5,53 @@ import { UserModel } from '../models/User';
 import path from 'path';
 import fs from 'fs';
 
+const MAX_FILE_SIZE_BYTES = Number(process.env.KYC_MAX_FILE_BYTES) || 5 * 1024 * 1024;
+
+const getBase64Payload = (dataUri: string) => {
+  if (!dataUri || typeof dataUri !== 'string') return null;
+  const match = dataUri.match(/^data:([\w/+.-]+);base64,(.*)$/s);
+  return match ? match[2] : null;
+};
+
+export const normalizeKycDocumentValue = (doc: any, options?: { maxFileSizeBytes?: number }) => {
+  if (!doc || typeof doc !== 'string') return doc || null;
+
+  const trimmed = doc.trim();
+  if (!trimmed) return null;
+
+  if (/^data:image\//i.test(trimmed)) {
+    const payload = getBase64Payload(trimmed);
+    if (payload) {
+      const estimatedBytes = Buffer.byteLength(payload, 'base64');
+      const maxAllowed = options?.maxFileSizeBytes ?? MAX_FILE_SIZE_BYTES;
+      if (estimatedBytes > maxAllowed) {
+        const err = new Error(`Document exceeds maximum allowed size of ${maxAllowed} bytes`);
+        (err as any).statusCode = 413;
+        throw err;
+      }
+    }
+    return trimmed;
+  }
+
+  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith('/') || trimmed.startsWith('uploads/')) {
+    return trimmed;
+  }
+
+  const rawPayload = trimmed.replace(/^data:.*;base64,/, '');
+  if (/^(?:[A-Za-z0-9+/]{20,}={0,2})$/.test(rawPayload)) {
+    const estimatedBytes = Buffer.byteLength(rawPayload, 'base64');
+    const maxAllowed = options?.maxFileSizeBytes ?? MAX_FILE_SIZE_BYTES;
+    if (estimatedBytes > maxAllowed) {
+      const err = new Error(`Document exceeds maximum allowed size of ${maxAllowed} bytes`);
+      (err as any).statusCode = 413;
+      throw err;
+    }
+    return `data:image/jpeg;base64,${trimmed}`;
+  }
+
+  return trimmed;
+};
+
 export const submitKyc = async (req: Request, res: Response) => {
   try {
     console.log('[KYC POST] Request received');
@@ -39,31 +86,7 @@ export const submitKyc = async (req: Request, res: Response) => {
     } = req.body;
 
     // Helper: max allowed file size for embedded base64 (per file)
-    const MAX_FILE_SIZE_BYTES = Number(process.env.KYC_MAX_FILE_BYTES) || 5 * 1024 * 1024; // default 5MB
-
-    // Helper to extract base64 payload from data URI and compute its byte size
-    const getBase64Payload = (dataUri: string) => {
-      if (!dataUri || typeof dataUri !== 'string') return null;
-      const match = dataUri.match(/^data:([\w/+.-]+);base64,(.*)$/s);
-      return match ? match[2] : null;
-    };
-
-    // Helper to save base64 data to file and return stored path/URL
-    const saveBase64ToFile = (dataUri: string, filePrefix: string) => {
-      const payload = getBase64Payload(dataUri);
-      if (!payload) return null;
-      const buffer = Buffer.from(payload, 'base64');
-      const uploadsDir = path.join(process.cwd(), 'uploads', 'kyc');
-      if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-      const extMatch = dataUri.match(/^data:image\/(\w+);base64,/);
-      const ext = extMatch ? extMatch[1] : 'bin';
-      const fileName = `${filePrefix}_${Date.now()}_${Math.floor(Math.random()*10000)}.${ext}`;
-      const filePath = path.join(uploadsDir, fileName);
-      fs.writeFileSync(filePath, buffer);
-      const baseUrl = process.env.UPLOAD_BASE_URL || '';
-      const rel = path.relative(path.join(process.cwd(), 'uploads'), filePath).split(path.sep).join('/');
-      return baseUrl ? `${baseUrl}/uploads/${rel}` : `/uploads/${rel}`;
-    };
+    // default 5MB
     
     // Validate required fields
     const missingFields = [];
@@ -83,25 +106,13 @@ export const submitKyc = async (req: Request, res: Response) => {
 
     console.log(`[KYC POST] Processing submission for user ${userId}`);
 
-    // Validate and (if data URI) save documents to disk instead of storing huge base64 in DB
+    // Normalize and store the document as a base64 data URL in the database.
     const processDocument = (doc: any, fieldName: string) => {
-      if (!doc || typeof doc !== 'string') return doc || null;
-      // If it's a data URI, evaluate size
-      if (doc.startsWith('data:')) {
-        const payload = getBase64Payload(doc);
-        if (!payload) return null;
-        const estimatedBytes = Buffer.byteLength(payload, 'base64');
-        console.log(`[KYC POST] ${fieldName} size bytes:`, estimatedBytes);
-        if (estimatedBytes > MAX_FILE_SIZE_BYTES) {
-          const err = new Error(`${fieldName} exceeds maximum allowed size of ${MAX_FILE_SIZE_BYTES} bytes`);
-          (err as any).statusCode = 413;
-          throw err;
-        }
-        // Save to file and return accessible URL
-        return saveBase64ToFile(doc, fieldName);
+      const normalized = normalizeKycDocumentValue(doc, { maxFileSizeBytes: MAX_FILE_SIZE_BYTES });
+      if (normalized) {
+        console.log(`[KYC POST] ${fieldName} normalized to ${typeof normalized === 'string' ? normalized.slice(0, 30) : 'non-string'}...`);
       }
-      // If it's already a URL/path, keep as-is
-      return doc;
+      return normalized;
     };
     
     let kyc = await KycModel.findOne({ userId });
@@ -237,7 +248,9 @@ export const uploadKycFiles = async (req: Request & { files?: any }, res: Respon
     }
 
     // Build accessible URLs for saved files
-    const baseUrl = process.env.UPLOAD_BASE_URL || '';
+    const envBaseUrl = (process.env.UPLOAD_BASE_URL || process.env.BACKEND_URL || '').replace(/\/$/, '');
+    const requestBaseUrl = req ? `${req.protocol}://${req.get('host')}`.replace(/\/$/, '') : '';
+    const baseUrl = (envBaseUrl || requestBaseUrl || '').replace(/\/$/, '');
     const fileUrls = files.map((f: any) => {
       // Ensure forward slashes for URLs
       const rel = path.relative(path.join(process.cwd(), 'uploads'), f.path).split(path.sep).join('/');
