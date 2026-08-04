@@ -549,7 +549,8 @@ var init_market_service = __esm({
       static async getWatchSymbols() {
         const { SymbolModel: SymbolModel2 } = await Promise.resolve().then(() => (init_Symbol(), Symbol_exports));
         const symbols = await SymbolModel2.find({ visibleToUsers: { $ne: false } }).lean();
-        return symbols.map((s) => s.symbol);
+        const supported = SymbolMapper.getAllSymbols();
+        return symbols.map((s) => s.symbol).filter((sym) => supported.includes(SymbolMapper.normalizeSymbol(sym)));
       }
       static async getWatchQuotes() {
         const symbols = await this.getWatchSymbols();
@@ -718,6 +719,12 @@ var init_SymbolSpecification = __esm({
       static applyLeverageOverrides(symInfo) {
         const sym = symInfo.symbol?.toUpperCase();
         if (!sym) return symInfo;
+        if (!symInfo.status) {
+          symInfo.status = symInfo.isActive === false ? "CLOSED" : "OPEN";
+        }
+        if (symInfo.tradingEnabled === void 0 || symInfo.tradingEnabled === null) {
+          symInfo.tradingEnabled = symInfo.isActive !== false;
+        }
         if (symInfo.leverageLimit === 100) {
           if (sym.startsWith("XAU") || sym.startsWith("XAG")) {
             symInfo.leverageLimit = 500;
@@ -770,7 +777,8 @@ var init_SymbolSpecification = __esm({
           lotStep: 0.01,
           leverageLimit,
           spread: 1,
-          isActive: true
+          status: "OPEN",
+          tradingEnabled: true
         };
       }
     };
@@ -1133,7 +1141,7 @@ var register = async (req, res, next) => {
     if (existing) {
       return res.status(400).json({ error: "Username already taken" });
     }
-    const hashed = await bcrypt.hash(password, 12);
+    const hashed = await bcrypt.hash(password, 8);
     const user = await UserModel.create({
       username: username.toLowerCase(),
       passwordHash: hashed,
@@ -1284,12 +1292,24 @@ var SocketServer = class {
     if (this.io) {
       return this.io;
     }
+    const allowedOrigins2 = (process.env.FRONTEND_URL || "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174,https://www.novaf.in,https://novaf.in,https://www.novaf.online,https://novaf.online,https://forex-frontend-2dmzc8t8z-forextradebio-boops-projects.vercel.app").split(",").map((origin) => origin.trim()).filter(Boolean);
     this.io = new Server(server2, {
       cors: {
-        origin: true,
-        methods: ["GET", "POST"],
-        credentials: true
+        origin: (origin, callback) => {
+          if (!origin) {
+            return callback(null, true);
+          }
+          if (allowedOrigins2.includes(origin)) {
+            return callback(null, true);
+          }
+          console.warn(`[Socket.IO CORS] Rejected Origin: ${origin}`);
+          return callback(new Error("Not allowed by CORS"));
+        },
+        methods: ["GET", "POST", "OPTIONS"],
+        credentials: true,
+        allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"]
       },
+      transports: ["websocket", "polling"],
       pingInterval: 25e3,
       pingTimeout: 2e4
     });
@@ -1569,7 +1589,7 @@ var OrderValidator = class {
       throw new Error("Market is Closed");
     }
     const spec = SymbolSpecification.getSync(symbol);
-    if (!spec || !spec.isActive) {
+    if (!spec || spec.status === "CLOSED" || spec.status === "MAINTENANCE" || !spec.tradingEnabled) {
       throw new Error("Disabled Symbol");
     }
     if (volume < spec.minLot || volume > spec.maxLot) {
@@ -1901,7 +1921,7 @@ var OrderExecutionEngine = class {
           continue;
         }
         const sym = await SymbolModel.findOne({ symbol: order.symbol.toUpperCase() });
-        if (!sym || !sym.isActive) {
+        if (!sym || sym.status === "CLOSED" || sym.status === "MAINTENANCE" || !sym.tradingEnabled) {
           order.status = "CANCELLED";
           await order.save();
           await AuditLogModel.create({ action: "ORDER_CANCELLED", details: { orderId: order._id, reason: "SYMBOL_INACTIVE" } });
@@ -2156,8 +2176,9 @@ var createDeposit = async (req, res) => {
     const userId = req.user.id;
     const { amount, currency = "USD", paymentMethod = "UPI", utr } = req.body;
     let screenshot = req.body.screenshot || "";
-    if (req.file) {
-      screenshot = `/uploads/${req.file.filename}`;
+    const uploadedFile = req.file;
+    if (uploadedFile) {
+      screenshot = `/uploads/${uploadedFile.filename}`;
     }
     if (!amount || amount <= 0) {
       return res.status(400).json({ error: "Amount must be greater than 0" });
@@ -2208,10 +2229,7 @@ var getDeposits = async (req, res) => {
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { fileURLToPath } from "url";
-var __filename = fileURLToPath(import.meta.url);
-var __dirname = path.dirname(__filename);
-var uploadDir = path.join(__dirname, "../../uploads");
+var uploadDir = path.resolve(process.cwd(), "uploads");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -2353,6 +2371,45 @@ import fs3 from "fs";
 import mongoose15 from "mongoose";
 import path2 from "path";
 import fs2 from "fs";
+var MAX_FILE_SIZE_BYTES = Number(process.env.KYC_MAX_FILE_BYTES) || 5 * 1024 * 1024;
+var getBase64Payload = (dataUri) => {
+  if (!dataUri || typeof dataUri !== "string") return null;
+  const match = dataUri.match(/^data:([\w/+.-]+);base64,(.*)$/s);
+  return match ? match[2] : null;
+};
+var normalizeKycDocumentValue = (doc, options) => {
+  if (!doc || typeof doc !== "string") return doc || null;
+  const trimmed = doc.trim();
+  if (!trimmed) return null;
+  if (/^data:image\//i.test(trimmed)) {
+    const payload = getBase64Payload(trimmed);
+    if (payload) {
+      const estimatedBytes = Buffer.byteLength(payload, "base64");
+      const maxAllowed = options?.maxFileSizeBytes ?? MAX_FILE_SIZE_BYTES;
+      if (estimatedBytes > maxAllowed) {
+        const err = new Error(`Document exceeds maximum allowed size of ${maxAllowed} bytes`);
+        err.statusCode = 413;
+        throw err;
+      }
+    }
+    return trimmed;
+  }
+  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith("/") || trimmed.startsWith("uploads/")) {
+    return trimmed;
+  }
+  const rawPayload = trimmed.replace(/^data:.*;base64,/, "");
+  if (/^(?:[A-Za-z0-9+/]{20,}={0,2})$/.test(rawPayload)) {
+    const estimatedBytes = Buffer.byteLength(rawPayload, "base64");
+    const maxAllowed = options?.maxFileSizeBytes ?? MAX_FILE_SIZE_BYTES;
+    if (estimatedBytes > maxAllowed) {
+      const err = new Error(`Document exceeds maximum allowed size of ${maxAllowed} bytes`);
+      err.statusCode = 413;
+      throw err;
+    }
+    return `data:image/jpeg;base64,${trimmed}`;
+  }
+  return trimmed;
+};
 var submitKyc = async (req, res) => {
   try {
     console.log("[KYC POST] Request received");
@@ -2382,27 +2439,6 @@ var submitKyc = async (req, res) => {
       ifscCode,
       upiId
     } = req.body;
-    const MAX_FILE_SIZE_BYTES = Number(process.env.KYC_MAX_FILE_BYTES) || 5 * 1024 * 1024;
-    const getBase64Payload = (dataUri) => {
-      if (!dataUri || typeof dataUri !== "string") return null;
-      const match = dataUri.match(/^data:([\w/+.-]+);base64,(.*)$/s);
-      return match ? match[2] : null;
-    };
-    const saveBase64ToFile = (dataUri, filePrefix) => {
-      const payload = getBase64Payload(dataUri);
-      if (!payload) return null;
-      const buffer = Buffer.from(payload, "base64");
-      const uploadsDir = path2.join(process.cwd(), "uploads", "kyc");
-      if (!fs2.existsSync(uploadsDir)) fs2.mkdirSync(uploadsDir, { recursive: true });
-      const extMatch = dataUri.match(/^data:image\/(\w+);base64,/);
-      const ext = extMatch ? extMatch[1] : "bin";
-      const fileName = `${filePrefix}_${Date.now()}_${Math.floor(Math.random() * 1e4)}.${ext}`;
-      const filePath = path2.join(uploadsDir, fileName);
-      fs2.writeFileSync(filePath, buffer);
-      const baseUrl = process.env.UPLOAD_BASE_URL || "";
-      const rel = path2.relative(path2.join(process.cwd(), "uploads"), filePath).split(path2.sep).join("/");
-      return baseUrl ? `${baseUrl}/uploads/${rel}` : `/uploads/${rel}`;
-    };
     const missingFields = [];
     if (!aadharNumber) missingFields.push("aadharNumber");
     if (!aadharDocument) missingFields.push("aadharDocument");
@@ -2418,20 +2454,11 @@ var submitKyc = async (req, res) => {
     }
     console.log(`[KYC POST] Processing submission for user ${userId}`);
     const processDocument = (doc, fieldName) => {
-      if (!doc || typeof doc !== "string") return doc || null;
-      if (doc.startsWith("data:")) {
-        const payload = getBase64Payload(doc);
-        if (!payload) return null;
-        const estimatedBytes = Buffer.byteLength(payload, "base64");
-        console.log(`[KYC POST] ${fieldName} size bytes:`, estimatedBytes);
-        if (estimatedBytes > MAX_FILE_SIZE_BYTES) {
-          const err = new Error(`${fieldName} exceeds maximum allowed size of ${MAX_FILE_SIZE_BYTES} bytes`);
-          err.statusCode = 413;
-          throw err;
-        }
-        return saveBase64ToFile(doc, fieldName);
+      const normalized = normalizeKycDocumentValue(doc, { maxFileSizeBytes: MAX_FILE_SIZE_BYTES });
+      if (normalized) {
+        console.log(`[KYC POST] ${fieldName} normalized to ${typeof normalized === "string" ? normalized.slice(0, 30) : "non-string"}...`);
       }
-      return doc;
+      return normalized;
     };
     let kyc = await KycModel.findOne({ userId });
     console.log("[KYC POST] Existing KYC record found:", kyc ? kyc._id : "none");
@@ -2543,10 +2570,20 @@ var uploadKycFiles = async (req, res) => {
     if (!files || files.length === 0) {
       return res.status(400).json({ success: false, error: "No files uploaded" });
     }
-    const baseUrl = process.env.UPLOAD_BASE_URL || "";
+    const getMimeType = (file) => {
+      if (file.mimetype && file.mimetype.startsWith("image/")) return file.mimetype;
+      const ext = path2.extname(file.originalname || "").toLowerCase();
+      if (ext === ".png") return "image/png";
+      if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+      if (ext === ".webp") return "image/webp";
+      if (ext === ".gif") return "image/gif";
+      return "application/octet-stream";
+    };
     const fileUrls = files.map((f) => {
-      const rel = path2.relative(path2.join(process.cwd(), "uploads"), f.path).split(path2.sep).join("/");
-      return baseUrl ? `${baseUrl}/uploads/${rel}` : `/uploads/${rel}`;
+      const fileBuffer = fs2.readFileSync(f.path);
+      const mimeType = getMimeType(f);
+      const base64 = fileBuffer.toString("base64");
+      return `data:${mimeType};base64,${base64}`;
     });
     try {
       const rawUserId = req.user?.id;
@@ -3130,6 +3167,22 @@ var ExchangeRateSchema = new Schema18(
 var ExchangeRateModel = mongoose20.model("ExchangeRate", ExchangeRateSchema);
 
 // src/controllers/adminController.ts
+var buildPublicUploadUrl = (value, request) => {
+  if (!value || typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  if (/^data:image\//i.test(trimmed) || /^blob:/i.test(trimmed) || /^https?:\/\//i.test(trimmed)) return trimmed;
+  const envBaseUrl = (process.env.UPLOAD_BASE_URL || process.env.BACKEND_URL || "").replace(/\/$/, "");
+  const requestBaseUrl = request ? `${request.protocol}://${request.get("host")}`.replace(/\/$/, "") : "";
+  const baseUrl = (envBaseUrl || requestBaseUrl || "http://localhost:8000").replace(/\/$/, "");
+  const rootBase = baseUrl.replace(/\/api$/, "");
+  if (trimmed.startsWith("/uploads/")) return `${rootBase}${trimmed}`;
+  if (trimmed.startsWith("/api/uploads/")) return `${rootBase}${trimmed.replace("/api", "")}`;
+  if (trimmed.startsWith("uploads/")) return `${rootBase}/${trimmed}`;
+  if (trimmed.startsWith("/")) return `${rootBase}${trimmed}`;
+  if (trimmed.startsWith("http")) return trimmed;
+  return `${rootBase}/uploads/${trimmed}`;
+};
 var logAdminAction = async (adminId, action, details) => {
   await AuditLogModel.create({ adminId, action, details });
 };
@@ -3223,6 +3276,7 @@ var approveWithdrawal = async (req, res) => {
         type: "WITHDRAWAL",
         amount: withdrawal.amount,
         balanceAfter: wallet.balance,
+        status: "APPROVED",
         description: "Withdrawal Approved"
       });
     }
@@ -3316,7 +3370,27 @@ var getAllUsers = async (req, res) => {
 };
 var getKycRequests = async (req, res) => {
   try {
-    const kycRequests = await KycModel.find().populate("userId", "fullName email username kycStatus").sort({ createdAt: -1 });
+    const rawKycRequests = await KycModel.find().populate("userId", "fullName email username kycStatus").sort({ createdAt: -1 });
+    const kycRequests = rawKycRequests.map((kyc) => {
+      const rawDoc = kyc.toObject ? kyc.toObject() : kyc;
+      const documents = Array.isArray(rawDoc.documents) ? rawDoc.documents.map((item) => {
+        if (typeof item === "string") return buildPublicUploadUrl(item, req);
+        if (item && typeof item === "object") {
+          return buildPublicUploadUrl(item.url || item.src || item.path || item.image || item.file || item.document || item.documentUrl || item.fileUrl, req);
+        }
+        return item;
+      }).filter(Boolean) : [];
+      const frontImage = buildPublicUploadUrl(rawDoc.aadharDocument || rawDoc.frontImage || rawDoc.aadharDocumentUrl || rawDoc.aadharUrl || documents[0], req);
+      const selfieImage = buildPublicUploadUrl(rawDoc.panDocument || rawDoc.selfieImage || rawDoc.panDocumentUrl || rawDoc.panUrl || documents[1], req);
+      return {
+        ...rawDoc,
+        aadharDocument: frontImage,
+        panDocument: selfieImage,
+        frontImage,
+        selfieImage,
+        documents
+      };
+    });
     console.log("[GET /admin/kyc] fetched kycRequests count:", kycRequests.length);
     res.json({ kycRequests });
   } catch (error) {
@@ -3438,7 +3512,9 @@ var createSymbol = async (req, res) => {
       price: Number(price),
       leverageLimit: Number(leverageLimit),
       spread: Number(spread),
-      isActive: true
+      status: "OPEN",
+      tradingEnabled: true,
+      visibleToUsers: true
     });
     await logAdminAction(req.user.id, "CREATE_SYMBOL", { symbol: normalized });
     res.status(201).json(newSymbol);
@@ -3813,7 +3889,6 @@ var getHistoryRecords = async (req, res) => {
 };
 
 // src/controllers/adminDepositController.ts
-import mongoose22 from "mongoose";
 init_Wallet();
 var getAllDeposits = async (req, res) => {
   try {
@@ -3834,73 +3909,55 @@ var getDepositById = async (req, res) => {
   }
 };
 var approveDeposit = async (req, res) => {
-  let retries = 3;
-  while (retries > 0) {
-    const session = await mongoose22.startSession();
-    session.startTransaction();
-    try {
-      const { id } = req.params;
-      const { remarks, customExchangeRate } = req.body;
-      const adminId = req.user.id;
-      const deposit = await DepositModel.findById(id).session(session);
-      if (!deposit) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(404).json({ success: false, error: "Deposit not found" });
-      }
-      if (deposit.status === "APPROVED") {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({ success: false, error: "Deposit is already approved" });
-      }
-      if (deposit.status === "REJECTED") {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({ success: false, error: "Deposit is already rejected" });
-      }
-      deposit.status = "APPROVED";
-      deposit.remarks = remarks || deposit.remarks;
-      deposit.approvedBy = adminId;
-      deposit.approvedAt = /* @__PURE__ */ new Date();
-      await deposit.save({ session });
-      const wallet = await WalletModel.findOne({ userId: deposit.userId }).session(session);
-      if (wallet) {
-        const exchangeRateDoc = await ExchangeRateModel.findOne({ isActive: true }).session(session);
-        const rate = customExchangeRate ? Number(customExchangeRate) : exchangeRateDoc ? exchangeRateDoc.currentRate : 85;
-        const amountInUSD = deposit.amount / rate;
-        deposit.exchangeRate = rate;
-        deposit.creditedUSD = amountInUSD;
-        await deposit.save({ session });
-        wallet.balance += amountInUSD;
-        wallet.equity = wallet.balance + (wallet.pnl || 0);
-        wallet.freeMargin = wallet.equity - (wallet.margin || 0);
-        await wallet.save({ session });
-        await TransactionModel.create([{
-          userId: deposit.userId,
-          type: "DEPOSIT",
-          amount: amountInUSD,
-          balanceAfter: wallet.balance,
-          status: "APPROVED",
-          referenceId: deposit._id.toString(),
-          description: `Deposit Approved by Admin${remarks ? " - " + remarks : ""}`
-        }], { session });
-      }
-      await AuditLogModel.create([{ adminId, action: "APPROVE_DEPOSIT", details: { depositId: id, remarks } }], { session });
-      await NotificationModel.create([{ userId: deposit.userId, title: "Deposit Approved", message: `Your deposit of ${deposit.currency} ${deposit.amount} has been approved.`, type: "SUCCESS" }], { session });
-      await session.commitTransaction();
-      session.endSession();
-      SocketServer.broadcastTransactionUpdate(deposit.userId.toString());
-      return res.json({ success: true, message: "Deposit approved successfully", deposit });
-    } catch (error) {
-      await session.abortTransaction();
-      session.endSession();
-      if (error.hasErrorLabel && error.hasErrorLabel("TransientTransactionError") && retries > 1) {
-        retries--;
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        continue;
-      }
-      return res.status(500).json({ success: false, error: error.message });
+  try {
+    const { id } = req.params;
+    const { remarks, customExchangeRate } = req.body;
+    const adminId = req.user.id;
+    const deposit = await DepositModel.findById(id);
+    if (!deposit) {
+      return res.status(404).json({ success: false, error: "Deposit not found" });
     }
+    if (deposit.status === "APPROVED") {
+      return res.status(400).json({ success: false, error: "Deposit is already approved" });
+    }
+    if (deposit.status === "REJECTED") {
+      return res.status(400).json({ success: false, error: "Deposit is already rejected" });
+    }
+    deposit.status = "APPROVED";
+    deposit.remarks = remarks || deposit.remarks;
+    deposit.approvedBy = adminId;
+    deposit.approvedAt = /* @__PURE__ */ new Date();
+    const wallet = await WalletModel.findOne({ userId: deposit.userId });
+    let amountInUSD = 0;
+    if (wallet) {
+      const exchangeRateDoc = await ExchangeRateModel.findOne({ isActive: true });
+      const rate = customExchangeRate ? Number(customExchangeRate) : exchangeRateDoc ? exchangeRateDoc.currentRate : 85;
+      amountInUSD = deposit.amount / rate;
+      deposit.exchangeRate = rate;
+      deposit.creditedUSD = amountInUSD;
+      wallet.balance += amountInUSD;
+      wallet.equity = wallet.balance + (wallet.pnl || 0);
+      wallet.freeMargin = wallet.equity - (wallet.margin || 0);
+      await wallet.save();
+    }
+    await deposit.save();
+    if (wallet) {
+      await TransactionModel.create({
+        userId: deposit.userId,
+        type: "DEPOSIT",
+        amount: amountInUSD,
+        balanceAfter: wallet.balance,
+        status: "APPROVED",
+        referenceId: deposit._id.toString(),
+        description: `Deposit Approved by Admin${remarks ? " - " + remarks : ""}`
+      });
+    }
+    await AuditLogModel.create({ adminId, action: "APPROVE_DEPOSIT", details: { depositId: id, remarks } });
+    await NotificationModel.create({ userId: deposit.userId, title: "Deposit Approved", message: `Your deposit of ${deposit.currency || "USD"} ${deposit.amount} has been approved.`, type: "SUCCESS" });
+    SocketServer.broadcastTransactionUpdate(deposit.userId.toString());
+    return res.json({ success: true, message: "Deposit approved successfully", deposit });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
   }
 };
 var rejectDeposit = async (req, res) => {
@@ -4019,7 +4076,7 @@ var adminRoutes_default = router11;
 import { Router as Router10 } from "express";
 
 // src/models/PaymentSettings.ts
-import mongoose23, { Schema as Schema20 } from "mongoose";
+import mongoose22, { Schema as Schema20 } from "mongoose";
 var PaymentSettingsSchema = new Schema20(
   {
     upiEnabled: { type: Boolean, default: false },
@@ -4041,16 +4098,35 @@ var PaymentSettingsSchema = new Schema20(
   },
   { timestamps: true }
 );
-var PaymentSettingsModel = mongoose23.model("PaymentSettings", PaymentSettingsSchema);
+var PaymentSettingsModel = mongoose22.model("PaymentSettings", PaymentSettingsSchema);
 
 // src/controllers/paymentSettingsController.ts
 import path4 from "path";
 import fs4 from "fs";
+var buildUploadUrl = (filename) => {
+  const baseUrl = process.env.UPLOAD_BASE_URL || process.env.API_BASE_URL || "";
+  if (baseUrl) {
+    const normalizedBase = baseUrl.replace(/\/$/, "");
+    return `${normalizedBase}/uploads/${filename}`;
+  }
+  return `/api/uploads/${filename}`;
+};
+var getStoredFilename = (value) => {
+  if (!value) return "";
+  const match = value.match(/(?:\/uploads\/|\/api\/uploads\/)([^/?#]+)$/i);
+  return match?.[1] || "";
+};
 var getPaymentSettings = async (req, res) => {
   try {
     let settings = await PaymentSettingsModel.findOne();
     if (!settings) {
       settings = await PaymentSettingsModel.create({});
+    }
+    if (settings.qrImage && settings.qrImage.startsWith("/uploads/")) {
+      settings.qrImage = buildUploadUrl(settings.qrImage.replace("/uploads/", ""));
+    }
+    if (settings.qrCodeUrl && settings.qrCodeUrl.startsWith("/uploads/")) {
+      settings.qrCodeUrl = buildUploadUrl(settings.qrCodeUrl.replace("/uploads/", ""));
     }
     res.json({ success: true, settings });
   } catch (error) {
@@ -4059,11 +4135,16 @@ var getPaymentSettings = async (req, res) => {
 };
 var updatePaymentSettings = async (req, res) => {
   try {
-    const updates = req.body;
+    const updates = { ...req.body };
+    const existingSettings = await PaymentSettingsModel.findOne();
     if (req.user && req.user.id) {
       updates.updatedBy = req.user.id;
     }
-    let settings = await PaymentSettingsModel.findOne();
+    if (existingSettings) {
+      if (updates.qrImage === void 0) updates.qrImage = existingSettings.qrImage || "";
+      if (updates.qrCodeUrl === void 0) updates.qrCodeUrl = existingSettings.qrCodeUrl || "";
+    }
+    let settings = existingSettings;
     if (!settings) {
       settings = await PaymentSettingsModel.create(updates);
     } else {
@@ -4076,18 +4157,20 @@ var updatePaymentSettings = async (req, res) => {
 };
 var uploadQR = async (req, res) => {
   try {
-    if (!req.file) {
+    const uploadedFile = req.file;
+    if (!uploadedFile) {
       return res.status(400).json({ success: false, error: "No image provided" });
     }
-    const qrImageUrl = `/uploads/${req.file.filename}`;
+    const base64Data = fs4.readFileSync(uploadedFile.path, "base64");
+    const mimeType = uploadedFile.mimetype || "image/png";
+    const qrImageUrl = `data:${mimeType};base64,${base64Data}`;
+    if (fs4.existsSync(uploadedFile.path)) {
+      fs4.unlinkSync(uploadedFile.path);
+    }
     let settings = await PaymentSettingsModel.findOne();
     if (!settings) {
       settings = await PaymentSettingsModel.create({ qrImage: qrImageUrl });
     } else {
-      if (settings.qrImage && settings.qrImage.startsWith("/uploads/")) {
-        const oldPath = path4.join(process.cwd(), settings.qrImage);
-        if (fs4.existsSync(oldPath)) fs4.unlinkSync(oldPath);
-      }
       settings.qrImage = qrImageUrl;
       settings.qrCodeUrl = qrImageUrl;
       if (req.user && req.user.id) {
@@ -4104,8 +4187,9 @@ var deleteQR = async (req, res) => {
   try {
     let settings = await PaymentSettingsModel.findOne();
     if (settings) {
-      if (settings.qrImage && settings.qrImage.startsWith("/uploads/")) {
-        const oldPath = path4.join(process.cwd(), settings.qrImage);
+      const previousFilename = getStoredFilename(settings.qrImage);
+      if (previousFilename) {
+        const oldPath = path4.join(process.cwd(), "uploads", previousFilename);
         if (fs4.existsSync(oldPath)) fs4.unlinkSync(oldPath);
       }
       settings.qrImage = "";
@@ -4854,7 +4938,7 @@ var updateProfile = async (req, res) => {
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
-    const { name, phone, country, avatar } = req.body;
+    const { name, phone, country, avatar, email } = req.body;
     if (name && typeof name !== "string") {
       res.status(400).json({ message: "Validation Error: name must be string" });
       return;
@@ -4871,11 +4955,16 @@ var updateProfile = async (req, res) => {
       res.status(400).json({ message: "Validation Error: avatar must be string" });
       return;
     }
+    if (email && typeof email !== "string") {
+      res.status(400).json({ message: "Validation Error: email must be string" });
+      return;
+    }
     const updateFields = {};
     if (name) updateFields.fullName = name;
     if (phone !== void 0) updateFields.phone = phone;
     if (country !== void 0) updateFields.country = country;
     if (avatar !== void 0) updateFields.avatar = avatar;
+    if (email !== void 0) updateFields.email = email;
     const updatedUser = await UserModel.findByIdAndUpdate(
       user._id,
       { $set: updateFields },
@@ -4999,31 +5088,51 @@ router19.get("/history", protect, admin, getExchangeRateHistory);
 var exchangeRateRoutes_default = router19;
 
 // server.ts
+init_SymbolSpecification();
 import path6 from "path";
 dotenv3.config({ path: "./.env" });
 console.log("MONGO URI =", process.env.MONGODB_URI);
 var app = express8();
-var allowedOrigins = (process.env.FRONTEND_URL ?? "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174").split(",").map((origin) => origin.trim()).filter(Boolean);
+var defaultAllowedOrigins = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "https://www.novaf.in",
+  "https://novaf.in",
+  "https://www.novaf.online",
+  "https://novaf.online",
+  "https://forex-factory-admin-panel.vercel.app",
+  "https://forex-backend-iem1.onrender.com",
+  "https://forex-backend-63xj.onrender.com",
+  "https://forex-frontend-2dmzc8t8z-forextradebio-boops-projects.vercel.app"
+];
+var envOrigins = (process.env.FRONTEND_URL || process.env.ALLOWED_ORIGINS || "").split(",").map((origin) => origin.trim()).filter(Boolean);
+var allowedOrigins = [.../* @__PURE__ */ new Set([...defaultAllowedOrigins, ...envOrigins])];
+var isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  if (/\.vercel\.app$/i.test(origin) || /\.onrender\.com$/i.test(origin)) return true;
+  return false;
+};
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin) {
-      callback(null, true);
-      return;
+    console.log(`[CORS] Incoming Origin: ${origin || "No Origin"}`);
+    if (isAllowedOrigin(origin)) {
+      console.log(`[CORS] Allowed Origin: ${origin}`);
+      return callback(null, true);
     }
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-      return;
-    }
-    console.warn(`CORS blocked origin: ${origin}. Allowed origins: ${allowedOrigins.join(", ")}`);
-    callback(null, true);
+    console.warn(`[CORS] Rejected Origin: ${origin}. Allowed origins: ${allowedOrigins.join(", ")}`);
+    return callback(new Error("Not allowed by CORS"));
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"]
 }));
 app.use(express8.json({ limit: "50mb" }));
 app.use(express8.urlencoded({ limit: "50mb", extended: true }));
 app.use("/uploads", express8.static(path6.join(process.cwd(), "uploads")));
+app.use("/api/uploads", express8.static(path6.join(process.cwd(), "uploads")));
 app.use("/api/auth", authRoutes_default);
 app.use("/api/health", healthRoutes_default);
 app.use("/api/wallet", walletRoutes_default);
@@ -5050,6 +5159,8 @@ var server = http.createServer(app);
 SocketServer.init(server);
 var start = async () => {
   await connectDatabase();
+  await SymbolSpecification.loadAll();
+  console.log("[Startup] Symbol specifications loaded.");
   const PORT = Number(process.env.PORT) || 8e3;
   server.listen(PORT, () => {
     console.log(`\u{1F680} Server running on port ${PORT}`);
