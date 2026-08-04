@@ -13,15 +13,18 @@ export class MarginEngine {
 
     const result = TradingEngine.evaluateWallet(wallet.balance, positions, prices);
 
-    for (const pos of positions) {
-      if (pos.status === 'OPEN') {
-        await import('../models/Position').then(({ PositionModel }) => {
-          PositionModel.updateOne(
-            { _id: pos._id, status: 'OPEN' }, 
-            { $set: { pnl: pos.pnl, marginUsed: pos.marginUsed, currentPrice: pos.currentPrice } }
-          ).exec();
-        });
-      }
+    const { PositionModel } = await import('../models/Position');
+    const bulkOps = positions
+      .filter(pos => pos.status === 'OPEN')
+      .map(pos => ({
+        updateOne: {
+          filter: { _id: pos._id, status: 'OPEN' },
+          update: { $set: { pnl: pos.pnl, marginUsed: pos.marginUsed, currentPrice: pos.currentPrice } }
+        }
+      }));
+    
+    if (bulkOps.length > 0) {
+      await PositionModel.bulkWrite(bulkOps);
     }
 
     wallet.equity = result.equity;
