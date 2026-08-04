@@ -20,7 +20,7 @@ const buildPublicUploadUrl = (value?: string, request?: Request) => {
   const trimmed = value.trim();
   if (!trimmed) return value;
   if (/^data:image\//i.test(trimmed) || /^blob:/i.test(trimmed) || /^https?:\/\//i.test(trimmed)) return trimmed;
-
+  if (/^(?:[A-Za-z0-9+/\s]{20,}={0,2})$/.test(trimmed)) return trimmed;
   const envBaseUrl = (process.env.UPLOAD_BASE_URL || process.env.BACKEND_URL || '').replace(/\/$/, '');
   const requestBaseUrl = request
     ? `${request.protocol}://${request.get('host')}`.replace(/\/$/, '')
@@ -52,12 +52,11 @@ export const getAdminDashboardData = async (req: Request, res: Response) => {
     }
 
     const users = await UserModel.find().select('-password -passwordHash');
-    const deposits = await DepositModel.find().populate('userId', 'fullName email');
-    const kycRequests = await KycModel.find().populate('userId', 'fullName email kycStatus');
+    const deposits = await DepositModel.find().select('-screenshot').populate('userId', 'fullName email');
+    const kycRequests = await KycModel.find().select('-aadharDocument -panDocument -documents').populate('userId', 'fullName email kycStatus');
     const wallets = await WalletModel.find().populate('userId', 'fullName email');
     const withdrawals = await WithdrawalModel.find().populate('userId', 'fullName email');
-
-    // Analytics
+    
     const activeUsers = users.filter(u => u.status === 'ACTIVE').length;
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
@@ -262,6 +261,7 @@ export const getAllUsers = async (req: Request, res: Response) => {
 export const getKycRequests = async (req: Request, res: Response) => {
   try {
     const rawKycRequests = await KycModel.find()
+      .select('-aadharDocument -panDocument -documents')
       .populate('userId', 'fullName email username kycStatus')
       .sort({ createdAt: -1 });
 
@@ -292,6 +292,42 @@ export const getKycRequests = async (req: Request, res: Response) => {
 
     console.log('[GET /admin/kyc] fetched kycRequests count:', kycRequests.length);
     res.json({ kycRequests });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const getKycRequestById = async (req: Request, res: Response) => {
+  try {
+    const rawDoc: any = await KycModel.findById(req.params.id)
+      .populate('userId', 'fullName email username kycStatus')
+      .lean();
+    if (!rawDoc) {
+      return res.status(404).json({ error: 'KYC not found' });
+    }
+    const documents = Array.isArray(rawDoc.documents)
+      ? rawDoc.documents.map((item: any) => {
+          if (typeof item === 'string') return buildPublicUploadUrl(item, req);
+          if (item && typeof item === 'object') {
+            return buildPublicUploadUrl(item.url || item.src || item.path || item.image || item.file || item.document || item.documentUrl || item.fileUrl, req);
+          }
+          return item;
+        }).filter(Boolean)
+      : [];
+
+    const frontImage = buildPublicUploadUrl(rawDoc.aadharDocument || rawDoc.frontImage || rawDoc.aadharDocumentUrl || rawDoc.aadharUrl || documents[0], req);
+    const selfieImage = buildPublicUploadUrl(rawDoc.panDocument || rawDoc.selfieImage || rawDoc.panDocumentUrl || rawDoc.panUrl || documents[1], req);
+
+    res.json({
+      kyc: {
+        ...rawDoc,
+        aadharDocument: frontImage,
+        panDocument: selfieImage,
+        frontImage,
+        selfieImage,
+        documents,
+      }
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
