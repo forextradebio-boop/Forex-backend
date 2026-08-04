@@ -71,19 +71,20 @@ export const uploadQR = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'No image provided' });
     }
     
-    const qrImageUrl = buildUploadUrl(uploadedFile.filename);
+    // Read the file and convert to base64 to store in DB directly (Render ephemeral filesystem fix)
+    const base64Data = fs.readFileSync(uploadedFile.path, 'base64');
+    const mimeType = uploadedFile.mimetype || 'image/png';
+    const qrImageUrl = `data:${mimeType};base64,${base64Data}`;
+    
+    // Clean up the temp file
+    if (fs.existsSync(uploadedFile.path)) {
+      fs.unlinkSync(uploadedFile.path);
+    }
     
     let settings = await PaymentSettingsModel.findOne();
     if (!settings) {
       settings = await PaymentSettingsModel.create({ qrImage: qrImageUrl });
     } else {
-      // Optional: Delete old QR image from disk here to save space
-      const previousFilename = getStoredFilename(settings.qrImage);
-      if (previousFilename) {
-        const oldPath = path.join(process.cwd(), 'uploads', previousFilename);
-        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-      }
-      
       settings.qrImage = qrImageUrl;
       settings.qrCodeUrl = qrImageUrl; // For backward compatibility
       if ((req as any).user && (req as any).user.id) {

@@ -29,8 +29,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     if (existing) {
       return res.status(400).json({ error: 'Username already taken' });
     }
-
-    const hashed = await bcrypt.hash(password, 12);
+    const hashed = await bcrypt.hash(password, 8);
 
     const user = await UserModel.create({
       username: username.toLowerCase(),
