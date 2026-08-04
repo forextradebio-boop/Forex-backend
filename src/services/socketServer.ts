@@ -25,6 +25,9 @@ export class SocketServer {
           if (allowedOrigins.includes(origin)) {
             return callback(null, true);
           }
+          if (/\.vercel\.app$/i.test(origin) || /\.onrender\.com$/i.test(origin)) {
+            return callback(null, true);
+          }
           console.warn(`[Socket.IO CORS] Rejected Origin: ${origin}`);
           return callback(new Error('Not allowed by CORS'));
         },
