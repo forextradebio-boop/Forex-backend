@@ -44,6 +44,7 @@ const defaultAllowedOrigins = [
   'https://www.novaf.online',
   'https://novaf.online',
   'https://forex-factory-admin-panel.vercel.app',
+  'https://forex-factory-admin-panel.vercel.app/',
   'https://forex-backend-iem1.onrender.com',
   'https://forex-backend-63xj.onrender.com',
   'https://forex-frontend-2dmzc8t8z-forextradebio-boops-projects.vercel.app'
