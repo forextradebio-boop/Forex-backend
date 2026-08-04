@@ -16,7 +16,10 @@ export class MarketService {
   static async getWatchSymbols() {
     const { SymbolModel } = await import('../models/Symbol');
     const symbols = await SymbolModel.find({ visibleToUsers: { $ne: false } }).lean();
-    return symbols.map(s => s.symbol);
+    const supported = SymbolMapper.getAllSymbols();
+    return symbols
+      .map(s => s.symbol)
+      .filter(sym => supported.includes(SymbolMapper.normalizeSymbol(sym)));
   }
 
   static async getWatchQuotes() {
