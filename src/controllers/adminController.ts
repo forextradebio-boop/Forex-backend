@@ -728,15 +728,15 @@ export const getAllTrades = async (req: Request, res: Response) => {
 
     // Fetch all open positions, closed positions, and pending orders
     const [openPositions, closedPositions, pendingOrders] = await Promise.all([
-      PositionModel.find({ status: 'OPEN' }).populate('userId', 'fullName email'),
-      PositionModel.find({ status: 'CLOSED' }).populate('userId', 'fullName email'),
-      OrderModel.find({ status: 'PENDING' }).populate('userId', 'fullName email')
+      PositionModel.find({ status: 'OPEN' }).populate('userId', 'fullName email username'),
+      PositionModel.find({ status: 'CLOSED' }).populate('userId', 'fullName email username'),
+      OrderModel.find({ status: 'PENDING' }).populate('userId', 'fullName email username')
     ]);
 
     const openTrades = openPositions.map(p => ({
       id: p._id,
       userId: p.userId?._id,
-      userFullName: (p.userId as any)?.fullName || 'Unknown User',
+      userFullName: (p.userId as any)?.fullName || (p.userId as any)?.username || (p.userId as any)?.email || 'Unknown User',
       assetSymbol: p.symbol,
       assetType: 'FOREX',
       direction: p.type,
@@ -752,7 +752,7 @@ export const getAllTrades = async (req: Request, res: Response) => {
     const closedTradesList = closedPositions.map(p => ({
       id: p._id,
       userId: p.userId?._id,
-      userFullName: (p.userId as any)?.fullName || 'Unknown User',
+      userFullName: (p.userId as any)?.fullName || (p.userId as any)?.username || (p.userId as any)?.email || 'Unknown User',
       assetSymbol: p.symbol,
       assetType: 'FOREX',
       direction: p.type,
@@ -768,7 +768,7 @@ export const getAllTrades = async (req: Request, res: Response) => {
     const pendingTrades = pendingOrders.map(o => ({
       id: o._id,
       userId: o.userId?._id,
-      userFullName: (o.userId as any)?.fullName || 'Unknown User',
+      userFullName: (o.userId as any)?.fullName || (o.userId as any)?.username || (o.userId as any)?.email || 'Unknown User',
       assetSymbol: o.symbol,
       assetType: 'FOREX',
       direction: o.type,
