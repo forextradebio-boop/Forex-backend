@@ -1302,6 +1302,9 @@ var SocketServer = class {
           if (allowedOrigins2.includes(origin)) {
             return callback(null, true);
           }
+          if (/\.vercel\.app$/i.test(origin) || /\.onrender\.com$/i.test(origin)) {
+            return callback(null, true);
+          }
           console.warn(`[Socket.IO CORS] Rejected Origin: ${origin}`);
           return callback(new Error("Not allowed by CORS"));
         },
@@ -1672,15 +1675,15 @@ var MarginEngine = class {
     const wallet = await WalletModel.findOne({ userId });
     if (!wallet) return null;
     const result = TradingEngine.evaluateWallet(wallet.balance, positions, prices);
-    for (const pos of positions) {
-      if (pos.status === "OPEN") {
-        await Promise.resolve().then(() => (init_Position(), Position_exports)).then(({ PositionModel: PositionModel2 }) => {
-          PositionModel2.updateOne(
-            { _id: pos._id, status: "OPEN" },
-            { $set: { pnl: pos.pnl, marginUsed: pos.marginUsed, currentPrice: pos.currentPrice } }
-          ).exec();
-        });
+    const { PositionModel: PositionModel2 } = await Promise.resolve().then(() => (init_Position(), Position_exports));
+    const bulkOps = positions.filter((pos) => pos.status === "OPEN").map((pos) => ({
+      updateOne: {
+        filter: { _id: pos._id, status: "OPEN" },
+        update: { $set: { pnl: pos.pnl, marginUsed: pos.marginUsed, currentPrice: pos.currentPrice } }
       }
+    }));
+    if (bulkOps.length > 0) {
+      await PositionModel2.bulkWrite(bulkOps);
     }
     wallet.equity = result.equity;
     wallet.margin = result.usedMargin;
@@ -1968,6 +1971,7 @@ var PriceEngine = class {
   static symbols = [];
   static tickOffsets = {};
   static marketSettingsCache = { status: "OPEN" };
+  static isTickRunning = false;
   static start() {
     if (this.isRunning) return;
     this.isRunning = true;
@@ -1988,12 +1992,16 @@ var PriceEngine = class {
       }
     }, 5e3);
     setInterval(async () => {
+      if (this.isTickRunning) return;
+      this.isTickRunning = true;
       try {
         if (this.marketSettingsCache?.status !== "CLOSED") {
           await this.updateTick();
         }
       } catch (err) {
         console.error("PriceEngine tick error", err);
+      } finally {
+        this.isTickRunning = false;
       }
     }, 250);
   }
@@ -3172,6 +3180,7 @@ var buildPublicUploadUrl = (value, request) => {
   const trimmed = value.trim();
   if (!trimmed) return value;
   if (/^data:image\//i.test(trimmed) || /^blob:/i.test(trimmed) || /^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^(?:[A-Za-z0-9+/\s]{20,}={0,2})$/.test(trimmed)) return trimmed;
   const envBaseUrl = (process.env.UPLOAD_BASE_URL || process.env.BACKEND_URL || "").replace(/\/$/, "");
   const requestBaseUrl = request ? `${request.protocol}://${request.get("host")}`.replace(/\/$/, "") : "";
   const baseUrl = (envBaseUrl || requestBaseUrl || "http://localhost:8000").replace(/\/$/, "");
@@ -3196,8 +3205,8 @@ var getAdminDashboardData = async (req, res) => {
       return res.status(403).json({ error: "Forbidden" });
     }
     const users = await UserModel.find().select("-password -passwordHash");
-    const deposits = await DepositModel.find().populate("userId", "fullName email");
-    const kycRequests = await KycModel.find().populate("userId", "fullName email kycStatus");
+    const deposits = await DepositModel.find().select("-screenshot").populate("userId", "fullName email");
+    const kycRequests = await KycModel.find().select("-aadharDocument -panDocument -documents").populate("userId", "fullName email kycStatus");
     const wallets = await WalletModel.find().populate("userId", "fullName email");
     const withdrawals = await WithdrawalModel.find().populate("userId", "fullName email");
     const activeUsers = users.filter((u) => u.status === "ACTIVE").length;
@@ -3370,7 +3379,7 @@ var getAllUsers = async (req, res) => {
 };
 var getKycRequests = async (req, res) => {
   try {
-    const rawKycRequests = await KycModel.find().populate("userId", "fullName email username kycStatus").sort({ createdAt: -1 });
+    const rawKycRequests = await KycModel.find().select("-aadharDocument -panDocument -documents").populate("userId", "fullName email username kycStatus").sort({ createdAt: -1 });
     const kycRequests = rawKycRequests.map((kyc) => {
       const rawDoc = kyc.toObject ? kyc.toObject() : kyc;
       const documents = Array.isArray(rawDoc.documents) ? rawDoc.documents.map((item) => {
@@ -3393,6 +3402,35 @@ var getKycRequests = async (req, res) => {
     });
     console.log("[GET /admin/kyc] fetched kycRequests count:", kycRequests.length);
     res.json({ kycRequests });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+var getKycRequestById = async (req, res) => {
+  try {
+    const rawDoc = await KycModel.findById(req.params.id).populate("userId", "fullName email username kycStatus").lean();
+    if (!rawDoc) {
+      return res.status(404).json({ error: "KYC not found" });
+    }
+    const documents = Array.isArray(rawDoc.documents) ? rawDoc.documents.map((item) => {
+      if (typeof item === "string") return buildPublicUploadUrl(item, req);
+      if (item && typeof item === "object") {
+        return buildPublicUploadUrl(item.url || item.src || item.path || item.image || item.file || item.document || item.documentUrl || item.fileUrl, req);
+      }
+      return item;
+    }).filter(Boolean) : [];
+    const frontImage = buildPublicUploadUrl(rawDoc.aadharDocument || rawDoc.frontImage || rawDoc.aadharDocumentUrl || rawDoc.aadharUrl || documents[0], req);
+    const selfieImage = buildPublicUploadUrl(rawDoc.panDocument || rawDoc.selfieImage || rawDoc.panDocumentUrl || rawDoc.panUrl || documents[1], req);
+    res.json({
+      kyc: {
+        ...rawDoc,
+        aadharDocument: frontImage,
+        panDocument: selfieImage,
+        frontImage,
+        selfieImage,
+        documents
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -4036,6 +4074,7 @@ router11.get("/dashboard", getAdminDashboardData);
 router11.get("/users", getAllUsers);
 router11.get("/users/:id/details", getUserDetails);
 router11.get("/kyc", getKycRequests);
+router11.get("/kyc/:id", getKycRequestById);
 router11.get("/withdrawals", getWithdrawals2);
 router11.get("/symbols", getSymbols);
 router11.get("/trades", getAllTrades);
@@ -5103,6 +5142,7 @@ var defaultAllowedOrigins = [
   "https://www.novaf.online",
   "https://novaf.online",
   "https://forex-factory-admin-panel.vercel.app",
+  "https://forex-factory-admin-panel.vercel.app/",
   "https://forex-backend-iem1.onrender.com",
   "https://forex-backend-63xj.onrender.com",
   "https://forex-frontend-2dmzc8t8z-forextradebio-boops-projects.vercel.app"
@@ -5129,8 +5169,12 @@ app.use(cors({
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"]
 }));
-app.use(express8.json({ limit: "50mb" }));
-app.use(express8.urlencoded({ limit: "50mb", extended: true }));
+app.use(express8.json({ limit: "100mb" }));
+app.use(express8.urlencoded({ limit: "100mb", extended: true }));
+app.use((req, res, next) => {
+  console.log(`[REQUEST] ${req.method} ${req.url}`);
+  next();
+});
 app.use("/uploads", express8.static(path6.join(process.cwd(), "uploads")));
 app.use("/api/uploads", express8.static(path6.join(process.cwd(), "uploads")));
 app.use("/api/auth", authRoutes_default);
