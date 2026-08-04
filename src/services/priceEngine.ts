@@ -18,6 +18,8 @@ export class PriceEngine {
   private static tickOffsets: Record<string, number> = {};
   private static marketSettingsCache: any = { status: 'OPEN' };
 
+  private static isTickRunning = false;
+
   static start() {
     if (this.isRunning) return;
     this.isRunning = true;
@@ -43,12 +45,16 @@ export class PriceEngine {
     }, 5000);
 
     setInterval(async () => {
+      if (this.isTickRunning) return;
+      this.isTickRunning = true;
       try {
         if (this.marketSettingsCache?.status !== 'CLOSED') {
           await this.updateTick();
         }
       } catch (err) {
         console.error('PriceEngine tick error', err);
+      } finally {
+        this.isTickRunning = false;
       }
     }, 250);
   }
