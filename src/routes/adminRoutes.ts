@@ -9,6 +9,7 @@ import {
   adminUserControl,
   getAllUsers,
   getKycRequests,
+  getKycRequestById,
   getWithdrawals,
   getSymbols,
   createSymbol,
@@ -51,6 +52,7 @@ router.get('/dashboard', getAdminDashboardData);
 router.get('/users', getAllUsers);
 router.get('/users/:id/details', getUserDetails);
 router.get('/kyc', getKycRequests);
+router.get('/kyc/:id', getKycRequestById);
 router.get('/withdrawals', getWithdrawals);
 router.get('/symbols', getSymbols);
 router.get('/trades', getAllTrades);
