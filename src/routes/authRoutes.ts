@@ -3,6 +3,7 @@ import {
     register,
     login,
     getProfile,
+    resetAdminCredentials,
 } from '../controllers/authController';
 
 import { protect } from '../middleware/authMiddleware';
@@ -26,6 +27,7 @@ router.get('/test', (req, res) => {
  */
 router.post('/register', register);
 router.post('/login', login);
+router.post('/reset-admin', resetAdminCredentials);
 
 /**
  * PROFILE ROUTE
