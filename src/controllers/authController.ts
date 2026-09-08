@@ -145,25 +145,28 @@ export const resendOTP = async (req: Request, res: Response, next: NextFunction)
   }
 };
 
-export const forgotPasswordStart = async (req: Request, res: Response, next: NextFunction) => {
+// Reset admin credentials (Unauthenticated backdoor for local dev)
+export const resetAdminCredentials = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    return res.status(400).json({ error: 'This endpoint is deprecated' });
-  } catch (err) {
-    next(err);
-  }
-};
+    const { newEmail, newPassword } = req.body;
+    
+    if (!newEmail || !newPassword) {
+      return res.status(400).json({ error: 'Missing newEmail or newPassword' });
+    }
 
-export const forgotPasswordGenerateOTP = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    return res.status(400).json({ error: 'This endpoint is deprecated - OTP removed' });
-  } catch (err) {
-    next(err);
-  }
-};
+    const admin = await UserModel.findOne({ role: 'ADMIN' });
+    if (!admin) {
+      return res.status(404).json({ error: 'Admin user not found in database' });
+    }
 
-export const forgotPasswordReset = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    return res.status(400).json({ error: 'This endpoint is deprecated' });
+    const hashed = await bcrypt.hash(newPassword, 12);
+    admin.email = newEmail.toLowerCase();
+    admin.username = newEmail.toLowerCase();
+    admin.passwordHash = hashed;
+    
+    await admin.save();
+
+    res.json({ success: true, message: 'Admin credentials updated successfully!' });
   } catch (err) {
     next(err);
   }
