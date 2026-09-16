@@ -29,7 +29,8 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     if (existing) {
       return res.status(400).json({ error: 'Username already taken' });
     }
-    const hashed = await bcrypt.hash(password, 8);
+
+    const hashed = await bcrypt.hash(password, 12);
 
     const user = await UserModel.create({
       username: username.toLowerCase(),
@@ -63,7 +64,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       documents: [],
     });
 
-    const token = signAccessToken({ id: user._id, role: user.role, sessionVersion: user.sessionVersion || 0 });
+    const token = signAccessToken({ id: user._id, role: user.role });
     const refreshToken = signRefreshToken({ id: user._id });
     const profile: any = user.toObject();
     delete profile.password;
@@ -98,7 +99,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const token = signAccessToken({ id: user._id, role: user.role, sessionVersion: user.sessionVersion || 0 });
+    const token = signAccessToken({ id: user._id, role: user.role });
     const refreshToken = signRefreshToken({ id: user._id });
     const profile: any = user.toObject();
     delete profile.password;
