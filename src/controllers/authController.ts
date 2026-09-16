@@ -63,7 +63,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       documents: [],
     });
 
-    const token = signAccessToken({ id: user._id, role: user.role });
+    const token = signAccessToken({ id: user._id, role: user.role, sessionVersion: user.sessionVersion || 0 });
     const refreshToken = signRefreshToken({ id: user._id });
     const profile: any = user.toObject();
     delete profile.password;
@@ -98,7 +98,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const token = signAccessToken({ id: user._id, role: user.role });
+    const token = signAccessToken({ id: user._id, role: user.role, sessionVersion: user.sessionVersion || 0 });
     const refreshToken = signRefreshToken({ id: user._id });
     const profile: any = user.toObject();
     delete profile.password;

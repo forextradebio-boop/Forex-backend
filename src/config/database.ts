@@ -8,6 +8,8 @@ export const connectDatabase = async () => {
     if (config.nodeEnv !== 'production' && config.mongoUri.includes('127.0.0.1:27017')) {
       // Dynamically import only in dev/test environments
       const { MongoMemoryServer } = await import('mongodb-memory-server');
+      // Increase the startup timeout for the in-memory server
+      process.env.MONGOMS_SERVER_STARTUP_TIMEOUT = '60000';
       mongoServer = await MongoMemoryServer.create();
       const uri = mongoServer.getUri();
       await mongoose.connect(uri, {

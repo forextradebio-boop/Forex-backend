@@ -14,6 +14,9 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
     if (!user) {
       return res.status(401).json({ message: 'Token belongs to deleted user', userId: decoded.id });
     }
+    if ((decoded.sessionVersion || 0) !== (user.sessionVersion || 0)) {
+      return res.status(401).json({ error: 'Session expired. Please log in again.' });
+    }
     (req as any).user = user;
     next();
   } catch (err) {

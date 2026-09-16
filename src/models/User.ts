@@ -9,6 +9,7 @@ export interface IUser extends Document {
   avatar?: string;
   password?: string; // legacy, kept for backward compatibility
   passwordHash?: string; // preferred field
+  sessionVersion: number;
   role: string;
   status: 'ACTIVE' | 'BANNED' | 'SUSPENDED' | 'DISABLED' | 'TRADING_BLOCKED';
   kycStatus: 'UNSUBMITTED' | 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -27,6 +28,7 @@ const UserSchema = new Schema<IUser>(
     // Keep legacy `password` for older code, but prefer `passwordHash`
     password: { type: String },
     passwordHash: { type: String },
+    sessionVersion: { type: Number, default: 0 },
     role: { type: String, default: 'user' },
     status: { type: String, enum: ['ACTIVE', 'BANNED', 'SUSPENDED', 'DISABLED', 'TRADING_BLOCKED'], default: 'ACTIVE' },
     kycStatus: {

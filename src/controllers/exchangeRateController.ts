@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
 import { ExchangeRateModel } from '../models/ExchangeRate';
 
-// Initialize default rate if none exists
-const initDefaultRate = async () => {
+// Initialize the default rate after the database connection is ready.
+export const initDefaultRate = async () => {
   const count = await ExchangeRateModel.countDocuments();
   if (count === 0) {
     await ExchangeRateModel.create({
@@ -14,7 +14,6 @@ const initDefaultRate = async () => {
     });
   }
 };
-initDefaultRate();
 
 export const getCurrentExchangeRate = async (req: Request, res: Response) => {
   try {

@@ -232,7 +232,9 @@ export const adminUserControl = async (req: Request, res: Response) => {
     if (action === 'BLOCK_TRADING') user.status = 'TRADING_BLOCKED';
     if (action === 'RESET_PASSWORD' && newPassword) {
       const salt = await bcrypt.genSalt(10);
-      user.password = await bcrypt.hash(newPassword, salt);
+      user.passwordHash = await bcrypt.hash(newPassword, salt);
+      user.password = undefined;
+      user.sessionVersion = (user.sessionVersion || 0) + 1;
     }
 
     await user.save();
