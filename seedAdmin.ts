@@ -15,7 +15,7 @@ async function seedAdmin() {
     await mongoose.connect(MONGO_URI);
     console.log('Connected to MongoDB');
 
-    const existingAdmin = await UserModel.findOne({ username: 'admin@trading.com' });
+    const existingAdmin = await UserModel.findOne({ role: { $regex: /^admin$/i } });
     if (existingAdmin) {
       console.log('Admin user already exists:', existingAdmin.username);
       process.exit(0);

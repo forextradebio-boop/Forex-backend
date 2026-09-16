@@ -129,7 +129,7 @@ import bcrypt from 'bcryptjs';
 
 const seedAdmin = async () => {
   try {
-    const existingAdmin = await UserModel.findOne({ username: 'admin@trading.com' });
+    const existingAdmin = await UserModel.findOne({ role: { $regex: /^admin$/i } });
     if (existingAdmin) {
       console.log('[Startup] Admin user already exists.');
       return;
