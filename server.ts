@@ -28,6 +28,7 @@ import orderRoutes from './src/routes/orderRoutes';
 import profileRoutes from './src/routes/profileRoutes';
 import transactionRoutes from './src/routes/transactionRoutes';
 import exchangeRateRoutes from './src/routes/exchangeRateRoutes';
+import { initDefaultRate } from './src/controllers/exchangeRateController';
 import { protect } from './src/middleware/authMiddleware';
 import { getClosedPositions } from './src/controllers/tradingController';
 
@@ -120,9 +121,63 @@ const server = http.createServer(app);
 SocketServer.init(server);
 
 import { SymbolSpecification } from './src/engine/SymbolSpecification';
+import { UserModel } from './src/models/User';
+import { WalletModel } from './src/models/Wallet';
+import { KycModel } from './src/models/Kyc';
+import { SettingsModel } from './src/models/Settings';
+import bcrypt from 'bcryptjs';
+
+const seedAdmin = async () => {
+  try {
+    const existingAdmin = await UserModel.findOne({ username: 'admin@trading.com' });
+    if (existingAdmin) {
+      console.log('[Startup] Admin user already exists.');
+      return;
+    }
+
+    const hashedPassword = await bcrypt.hash('Admin@1234', 12);
+    const adminUser = await UserModel.create({
+      username: 'admin@trading.com',
+      fullName: 'Admin User',
+      email: 'admin@trading.com',
+      passwordHash: hashedPassword,
+      role: 'ADMIN',
+      status: 'ACTIVE',
+      kycStatus: 'APPROVED'
+    });
+
+    await WalletModel.create({
+      userId: adminUser._id,
+      balance: 0,
+      equity: 0,
+      margin: 0,
+      freeMargin: 0,
+      pnl: 0,
+    });
+
+    await KycModel.create({
+      userId: adminUser._id,
+      status: 'APPROVED',
+      documents: [],
+    });
+
+    await SettingsModel.create({
+      userId: adminUser._id,
+      theme: 'light',
+      notifications: true,
+      language: 'en',
+    });
+
+    console.log('[Startup] Admin user created: admin@trading.com / Admin@1234');
+  } catch (error) {
+    console.error('[Startup] Failed to seed admin:', error);
+  }
+};
 
 const start = async () => {
   await connectDatabase();
+  await initDefaultRate();
+  await seedAdmin();
   await SymbolSpecification.loadAll();
   console.log('[Startup] Symbol specifications loaded.');
   const PORT = Number(process.env.PORT) || 8000;
