@@ -150,12 +150,12 @@ export const resendOTP = async (req: Request, res: Response, next: NextFunction)
 export const resetAdminCredentials = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { newEmail, newPassword } = req.body;
-    
+
     if (!newEmail || !newPassword) {
       return res.status(400).json({ error: 'Missing newEmail or newPassword' });
     }
 
-    const admin = await UserModel.findOne({ role: 'ADMIN' });
+    const admin = await UserModel.findOne({ role: { $regex: /^admin$/i } });
     if (!admin) {
       return res.status(404).json({ error: 'Admin user not found in database' });
     }
@@ -164,7 +164,7 @@ export const resetAdminCredentials = async (req: Request, res: Response, next: N
     admin.email = newEmail.toLowerCase();
     admin.username = newEmail.toLowerCase();
     admin.passwordHash = hashed;
-    
+
     await admin.save();
 
     res.json({ success: true, message: 'Admin credentials updated successfully!' });
