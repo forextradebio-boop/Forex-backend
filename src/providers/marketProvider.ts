@@ -121,7 +121,13 @@ export class MarketProvider {
     const host = process.env.RAPID_API_HOST || 'query1.finance.yahoo.com';
     const url = `https://${host}/v7/finance/quote?symbols=${yfSymbol}`;
     
-    const response = await axios.get(url, { timeout: 8000 });
+    const response = await axios.get(url, { 
+      timeout: 8000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Accept': 'application/json'
+      }
+    });
     const payload = response.data?.quoteResponse?.result?.[0];
     
     if (!payload) {
