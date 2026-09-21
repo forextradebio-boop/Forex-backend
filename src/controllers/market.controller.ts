@@ -190,3 +190,30 @@ export const getCrudeOilChart = async (req: Request, res: Response) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+export const getDividends = async (req: Request, res: Response) => {
+  try {
+    const cursor = req.query.cursor as string;
+    let url = 'https://api.massive.com/v3/reference/dividends';
+    if (cursor) {
+      url += `?cursor=${cursor}`;
+    }
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': 'Bearer Ou6vzKg8HGlOBRmr5ClS6F1myh4GioCh',
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).json({ error: `Massive API returned ${response.status}` });
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
