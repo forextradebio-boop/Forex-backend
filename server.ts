@@ -10,6 +10,7 @@ import healthRoutes from './src/routes/healthRoutes';
 import { errorHandler } from './src/middleware/errorHandler';
 import http from 'http';
 import { SocketServer } from './src/services/socketServer';
+import { MarketService } from './src/services/market.service';
 import { PriceEngine } from './src/services/priceEngine';
 import walletRoutes from './src/routes/walletRoutes';
 import depositRoutes from './src/routes/depositRoutes';
@@ -64,10 +65,7 @@ const isAllowedOrigin = (origin: string | undefined) => {
 
 app.use(cors({
   origin: (origin, callback) => {
-    console.log(`[CORS] Incoming Origin: ${origin || 'No Origin'}`);
-
     if (isAllowedOrigin(origin)) {
-      console.log(`[CORS] Allowed Origin: ${origin}`);
       return callback(null, true);
     }
 
@@ -82,7 +80,9 @@ app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 app.use((req, res, next) => {
-  console.log(`[REQUEST] ${req.method} ${req.url}`);
+  if (process.env.REQUEST_LOGGING === 'true') {
+    console.log(`[REQUEST] ${req.method} ${req.url}`);
+  }
   next();
 });
 
@@ -181,10 +181,21 @@ const start = async () => {
   await SymbolSpecification.loadAll();
   console.log('[Startup] Symbol specifications loaded.');
   const PORT = Number(process.env.PORT) || 8000;
-  server.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
+
+  try {
+    await MarketService.start();
     PriceEngine.start();
-  });
+
+    server.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+    });
+  } catch (err) {
+    console.error('[Startup] Failed to start market services:', err);
+    // Even if market services fail, we should start the server to allow API endpoints to work
+    server.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT} (Market Services Failed)`);
+    });
+  }
 };
 
 start();
