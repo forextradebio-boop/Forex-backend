@@ -234,250 +234,17 @@ var init_symbolMapper = __esm({
   }
 });
 
-// src/providers/marketProvider.ts
-import axios from "axios";
-var MarketProvider;
-var init_marketProvider = __esm({
-  "src/providers/marketProvider.ts"() {
-    "use strict";
-    init_symbolMapper();
-    MarketProvider = class {
-      static normalizeSymbol(symbol) {
-        return SymbolMapper.normalizeSymbol(symbol);
-      }
-      // Convert normal symbol to TwelveData format, e.g. EURUSD -> EUR/USD, USOIL -> WTI
-      static getTwelveDataSymbol(symbol) {
-        const normalized = this.normalizeSymbol(symbol);
-        const map = {
-          "USOIL": "WTI",
-          "UKOIL": "BRENT",
-          "XAUUSD": "XAU/USD",
-          "XAGUSD": "XAG/USD",
-          "BTCUSD": "BTC/USD",
-          "ETHUSD": "ETH/USD"
-        };
-        if (map[normalized]) return map[normalized];
-        if (normalized.length === 6 && SymbolMapper.getCategory(normalized) === "FOREX") {
-          return `${normalized.substring(0, 3)}/${normalized.substring(3)}`;
-        }
-        return normalized;
-      }
-      static mapTimeframeToTwelveData(timeframe) {
-        switch (timeframe.toLowerCase()) {
-          case "m1":
-          case "1m":
-            return "1min";
-          case "m5":
-          case "5m":
-            return "5min";
-          case "m15":
-          case "15m":
-            return "15min";
-          case "m30":
-          case "30m":
-            return "30min";
-          case "h1":
-          case "1h":
-            return "1h";
-          case "h2":
-          case "2h":
-            return "2h";
-          case "h4":
-          case "4h":
-            return "4h";
-          case "d1":
-          case "1d":
-            return "1day";
-          case "1wk":
-            return "1week";
-          case "1mo":
-            return "1month";
-          default:
-            return "1day";
-        }
-      }
-      static async fetchQuote(symbol) {
-        const apiKey = process.env.TWELVEDATA_API_KEY;
-        if (!apiKey) throw new Error("TWELVEDATA_API_KEY is not defined");
-        const normalized = this.normalizeSymbol(symbol);
-        const tdSymbol = this.getTwelveDataSymbol(normalized);
-        const url = `https://api.twelvedata.com/quote?symbol=${tdSymbol}&apikey=${apiKey}`;
-        const response = await axios.get(url, { timeout: 8e3 });
-        const data = response.data;
-        if (data.code && data.status === "error") {
-          throw new Error(`TwelveData API error: ${data.message}`);
-        }
-        if (!data.open || !data.close) {
-          throw new Error(`Invalid TwelveData quote response for ${tdSymbol}`);
-        }
-        const price = Number(data.close);
-        const previousClose = Number(data.previous_close);
-        const parsedObject = {
-          symbol: normalized,
-          price,
-          bid: price,
-          // Approximate if not provided
-          ask: price,
-          // Approximate if not provided
-          spread: 0,
-          high: Number(data.high),
-          low: Number(data.low),
-          open: Number(data.open),
-          previousClose,
-          change: Number(data.change),
-          changePercent: Number(data.percent_change),
-          category: SymbolMapper.getCategory(normalized),
-          marketStatus: data.is_market_open ? "OPEN" : "CLOSED",
-          volume: Number(data.volume) || 0,
-          timestamp: Number(data.timestamp) * 1e3 || Date.now()
-        };
-        return parsedObject;
-      }
-      static async fetchHistoricalCandles(symbol, timeframe = "D1") {
-        const apiKey = process.env.TWELVEDATA_API_KEY;
-        if (!apiKey) throw new Error("TWELVEDATA_API_KEY is not defined");
-        const normalized = this.normalizeSymbol(symbol);
-        const tdSymbol = this.getTwelveDataSymbol(normalized);
-        const tdInterval = this.mapTimeframeToTwelveData(timeframe);
-        const url = `https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=${tdInterval}&outputsize=500&timezone=UTC&apikey=${apiKey}`;
-        try {
-          const response = await axios.get(url, { timeout: 1e4 });
-          const data = response.data;
-          if (data.code && data.status === "error") {
-            throw new Error(`TwelveData API error: ${data.message}`);
-          }
-          if (!data.values || !Array.isArray(data.values)) {
-            console.warn(`[MarketProvider] No historical data returned for ${tdSymbol} (${tdInterval})`);
-            return [];
-          }
-          const nowSeconds = Math.floor(Date.now() / 1e3);
-          const candles = data.values.map((v) => ({
-            time: Math.floor((/* @__PURE__ */ new Date(v.datetime + "Z")).getTime() / 1e3),
-            open: Number(v.open),
-            high: Number(v.high),
-            low: Number(v.low),
-            close: Number(v.close),
-            volume: Number(v.volume) || 0
-          })).filter((c) => c.time <= nowSeconds).sort((a, b) => a.time - b.time);
-          return candles;
-        } catch (error) {
-          console.error(`[MarketProvider] fetchHistoricalCandles failed for ${tdSymbol}: ${error.message}`);
-          return [];
-        }
-      }
-      static async fetchMovers(params) {
-        const exchange = params.exchange || "US";
-        const name = params.name || "volume_gainers";
-        const locale = params.locale || "en";
-        const rapidApiKey = process.env.RAPIDAPI_KEY || process.env.RAPID_API_KEY;
-        if (!rapidApiKey) {
-          throw new Error("RapidAPI Key is not configured in .env");
-        }
-        const response = await axios.get("https://trading-view.p.rapidapi.com/market/get-movers", {
-          params: { exchange, name, locale },
-          headers: {
-            "Content-Type": "application/json",
-            "x-rapidapi-host": "trading-view.p.rapidapi.com",
-            "x-rapidapi-key": rapidApiKey
-          },
-          timeout: 1e4
-        });
-        const payload = response.data;
-        const symbols = Array.isArray(payload?.symbols) ? payload.symbols : [];
-        return {
-          totalCount: Number(payload?.totalCount ?? symbols.length),
-          fields: Array.isArray(payload?.fields) ? payload.fields : [],
-          symbols: symbols.map((item) => ({
-            s: item?.s,
-            f: Array.isArray(item?.f) ? item.f : []
-          })),
-          time: payload?.time
-        };
-      }
-      static getCategory(symbol) {
-        return SymbolMapper.getCategory(symbol);
-      }
-      static getAllSymbols() {
-        return SymbolMapper.getAllSymbols();
-      }
-    };
-  }
-});
-
-// src/models/Position.ts
-var Position_exports = {};
-__export(Position_exports, {
-  PositionModel: () => PositionModel
-});
-import mongoose6, { Schema as Schema5 } from "mongoose";
-var PositionSchema, PositionModel;
-var init_Position = __esm({
-  "src/models/Position.ts"() {
-    "use strict";
-    PositionSchema = new Schema5(
-      {
-        userId: { type: Schema5.Types.ObjectId, ref: "User", required: true },
-        symbol: { type: String, required: true },
-        type: { type: String, enum: ["BUY", "SELL"], required: true },
-        volume: { type: Number, required: true },
-        openPrice: { type: Number, required: true },
-        currentPrice: { type: Number, required: true },
-        sl: { type: Number },
-        tp: { type: Number },
-        pnl: { type: Number, default: 0 },
-        commission: { type: Number, default: 0 },
-        swap: { type: Number, default: 0 },
-        marginUsed: { type: Number, default: 0 },
-        status: { type: String, enum: ["OPEN", "CLOSED"], default: "OPEN" },
-        closePrice: { type: Number },
-        deletedAt: { type: Date },
-        isArchived: { type: Boolean, default: false }
-      },
-      { timestamps: true }
-    );
-    PositionModel = mongoose6.model("Position", PositionSchema);
-  }
-});
-
-// src/models/Order.ts
-var Order_exports = {};
-__export(Order_exports, {
-  OrderModel: () => OrderModel
-});
-import mongoose7, { Schema as Schema6 } from "mongoose";
-var OrderSchema, OrderModel;
-var init_Order = __esm({
-  "src/models/Order.ts"() {
-    "use strict";
-    OrderSchema = new Schema6(
-      {
-        userId: { type: Schema6.Types.ObjectId, ref: "User", required: true },
-        symbol: { type: String, required: true },
-        type: { type: String, enum: ["BUY", "SELL", "BUY_LIMIT", "SELL_LIMIT", "BUY_STOP", "SELL_STOP"], required: true },
-        volume: { type: Number, required: true },
-        price: { type: Number },
-        targetPrice: { type: Number, required: true },
-        sl: { type: Number },
-        tp: { type: Number },
-        status: { type: String, enum: ["PENDING", "EXECUTED", "CANCELLED"], default: "PENDING" }
-      },
-      { timestamps: true }
-    );
-    OrderModel = mongoose7.model("Order", OrderSchema);
-  }
-});
-
 // src/models/Symbol.ts
 var Symbol_exports = {};
 __export(Symbol_exports, {
   SymbolModel: () => SymbolModel
 });
-import mongoose8, { Schema as Schema7 } from "mongoose";
+import mongoose6, { Schema as Schema5 } from "mongoose";
 var SymbolSchema, SymbolModel;
 var init_Symbol = __esm({
   "src/models/Symbol.ts"() {
     "use strict";
-    SymbolSchema = new Schema7(
+    SymbolSchema = new Schema5(
       {
         symbol: { type: String, required: true, unique: true, uppercase: true, trim: true },
         name: { type: String, required: true },
@@ -498,7 +265,7 @@ var init_Symbol = __esm({
       },
       { timestamps: true }
     );
-    SymbolModel = mongoose8.model("Symbol", SymbolSchema);
+    SymbolModel = mongoose6.model("Symbol", SymbolSchema);
   }
 });
 
@@ -626,6 +393,366 @@ var init_SymbolSpecification = __esm({
         };
       }
     };
+  }
+});
+
+// src/models/ApiKey.ts
+import mongoose7, { Schema as Schema6 } from "mongoose";
+var ApiKeySchema, ApiKeyModel;
+var init_ApiKey = __esm({
+  "src/models/ApiKey.ts"() {
+    "use strict";
+    ApiKeySchema = new Schema6(
+      {
+        provider: {
+          type: String,
+          required: true,
+          enum: ["TWELVEDATA", "FINNHUB", "BINANCE", "YAHOO"],
+          default: "TWELVEDATA"
+        },
+        keyName: {
+          type: String,
+          required: true
+        },
+        keyValue: {
+          type: String,
+          required: false
+        },
+        status: {
+          type: String,
+          enum: ["ACTIVE", "INACTIVE", "EXHAUSTED"],
+          default: "ACTIVE"
+        },
+        errorCount: {
+          type: Number,
+          default: 0
+        }
+      },
+      { timestamps: true }
+    );
+    ApiKeyModel = mongoose7.model("ApiKey", ApiKeySchema);
+  }
+});
+
+// src/providers/marketProvider.ts
+import axios from "axios";
+var MarketProvider;
+var init_marketProvider = __esm({
+  "src/providers/marketProvider.ts"() {
+    "use strict";
+    init_symbolMapper();
+    init_SymbolSpecification();
+    init_ApiKey();
+    MarketProvider = class {
+      static normalizeSymbol(symbol) {
+        return SymbolMapper.normalizeSymbol(symbol);
+      }
+      // Convert normal symbol to TwelveData format, e.g. EURUSD -> EUR/USD, USOIL -> WTI
+      static getTwelveDataSymbol(symbol) {
+        const normalized = this.normalizeSymbol(symbol);
+        const map = {
+          "USOIL": "WTI",
+          "UKOIL": "BRENT",
+          "XAUUSD": "XAU/USD",
+          "XAGUSD": "XAG/USD",
+          "BTCUSD": "BTC/USD",
+          "ETHUSD": "ETH/USD",
+          "LTCUSD": "LTC/USD",
+          "XRPUSD": "XRP/USD",
+          "DOGEUSD": "DOGE/USD",
+          "BCHUSD": "BCH/USD"
+        };
+        if (map[normalized]) return map[normalized];
+        if (normalized.length === 6 && SymbolMapper.getCategory(normalized) === "FOREX") {
+          return `${normalized.substring(0, 3)}/${normalized.substring(3)}`;
+        }
+        return normalized;
+      }
+      static mapTimeframeToTwelveData(timeframe) {
+        switch (timeframe.toLowerCase()) {
+          case "m1":
+          case "1m":
+            return "1min";
+          case "m5":
+          case "5m":
+            return "5min";
+          case "m15":
+          case "15m":
+            return "15min";
+          case "m30":
+          case "30m":
+            return "30min";
+          case "h1":
+          case "1h":
+            return "1h";
+          case "h2":
+          case "2h":
+            return "2h";
+          case "h4":
+          case "4h":
+            return "4h";
+          case "d1":
+          case "1d":
+            return "1day";
+          case "1wk":
+            return "1week";
+          case "1mo":
+            return "1month";
+          default:
+            return "1day";
+        }
+      }
+      static getYahooSymbol(symbol) {
+        const normalized = this.normalizeSymbol(symbol);
+        if (normalized.endsWith("USD") && (normalized.startsWith("BTC") || normalized.startsWith("ETH") || normalized.startsWith("LTC") || normalized.startsWith("BCH") || normalized.startsWith("XRP") || normalized.startsWith("DOGE"))) {
+          return `${normalized.replace("USD", "")}-USD`;
+        }
+        const map = {
+          "US30": "^DJI",
+          "NAS100": "^IXIC",
+          "SPX500": "^GSPC",
+          "UK100": "^FTSE",
+          "GER40": "^GDAXI",
+          "USOIL": "CL=F",
+          "UKOIL": "BZ=F",
+          "NGAS": "NG=F",
+          "XAUUSD": "GC=F",
+          "XAGUSD": "SI=F"
+        };
+        if (map[normalized]) return map[normalized];
+        if (normalized.length === 6 && SymbolMapper.getCategory(normalized) === "FOREX") {
+          return `${normalized}=X`;
+        }
+        return normalized;
+      }
+      static yahooFinanceInstance = null;
+      static async fetchYahooQuote(symbol) {
+        const normalized = this.normalizeSymbol(symbol);
+        const yfSymbol = this.getYahooSymbol(normalized);
+        if (!this.yahooFinanceInstance) {
+          const yahooFinanceLib = (await import("yahoo-finance2")).default;
+          this.yahooFinanceInstance = new yahooFinanceLib({ suppressNotices: ["yahooSurvey"] });
+        }
+        try {
+          const payload = await this.yahooFinanceInstance.quote(yfSymbol);
+          if (!payload) {
+            throw new Error(`Invalid Yahoo response for ${symbol}`);
+          }
+          const price = Number(payload.regularMarketPrice);
+          const previousClose = Number(payload.regularMarketPreviousClose || price);
+          return {
+            symbol: normalized,
+            price,
+            bid: Number(payload.bid || price),
+            ask: Number(payload.ask || price),
+            spread: 0,
+            high: Number(payload.regularMarketDayHigh || price),
+            low: Number(payload.regularMarketDayLow || price),
+            open: Number(payload.regularMarketOpen || price),
+            previousClose,
+            change: Number(payload.regularMarketChange || 0),
+            changePercent: Number(payload.regularMarketChangePercent || 0),
+            category: SymbolMapper.getCategory(normalized),
+            marketStatus: payload.marketState === "REGULAR" ? "OPEN" : "CLOSED",
+            volume: Number(payload.regularMarketVolume || 0),
+            timestamp: Date.now()
+          };
+        } catch (e) {
+          throw new Error(`Yahoo Finance error for ${symbol}: ${e.message}`);
+        }
+      }
+      static async fetchQuote(symbol) {
+        let apiKey = process.env.TWELVEDATA_API_KEY || "19dea2e7729b4d81ad2271d8048ddc8e";
+        try {
+          const activeKey = await ApiKeyModel.findOne({ provider: "TWELVEDATA", status: "ACTIVE" });
+          if (activeKey && activeKey.keyValue) {
+            apiKey = activeKey.keyValue;
+          }
+        } catch (e) {
+          console.warn("[MarketProvider] Failed to fetch active TwelveData key for REST", e);
+        }
+        if (!apiKey) throw new Error("TWELVEDATA_API_KEY is not defined");
+        const normalized = this.normalizeSymbol(symbol);
+        const tdSymbol = this.getTwelveDataSymbol(normalized);
+        const url = `https://api.twelvedata.com/quote?symbol=${tdSymbol}&apikey=${apiKey}`;
+        const response = await axios.get(url, { timeout: 8e3 });
+        const data = response.data;
+        if (data.code && data.status === "error") {
+          throw new Error(`TwelveData API error: ${data.message}`);
+        }
+        if (!data.open || !data.close) {
+          throw new Error(`Invalid TwelveData quote response for ${tdSymbol}`);
+        }
+        const price = Number(data.close);
+        const previousClose = Number(data.previous_close);
+        const parsedObject = {
+          symbol: normalized,
+          price,
+          bid: price,
+          // Approximate if not provided
+          ask: price,
+          // Approximate if not provided
+          spread: 0,
+          high: Number(data.high),
+          low: Number(data.low),
+          open: Number(data.open),
+          previousClose,
+          change: Number(data.change),
+          changePercent: Number(data.percent_change),
+          category: SymbolMapper.getCategory(normalized),
+          marketStatus: data.is_market_open ? "OPEN" : "CLOSED",
+          volume: Number(data.volume) || 0,
+          timestamp: Number(data.timestamp) * 1e3 || Date.now()
+        };
+        return parsedObject;
+      }
+      static async fetchHistoricalCandles(symbol, timeframe = "D1") {
+        let apiKey = process.env.TWELVEDATA_API_KEY || "19dea2e7729b4d81ad2271d8048ddc8e";
+        try {
+          const activeKey = await ApiKeyModel.findOne({ provider: "TWELVEDATA", status: "ACTIVE" });
+          if (activeKey && activeKey.keyValue) {
+            apiKey = activeKey.keyValue;
+          }
+        } catch (e) {
+          console.warn("[MarketProvider] Failed to fetch active TwelveData key for candles", e);
+        }
+        if (!apiKey) throw new Error("TWELVEDATA_API_KEY is not defined");
+        const normalized = this.normalizeSymbol(symbol);
+        const tdSymbol = this.getTwelveDataSymbol(normalized);
+        const tdInterval = this.mapTimeframeToTwelveData(timeframe);
+        const url = `https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=${tdInterval}&outputsize=500&timezone=UTC&apikey=${apiKey}`;
+        try {
+          const response = await axios.get(url, { timeout: 1e4 });
+          const data = response.data;
+          if (data.code && data.status === "error") {
+            throw new Error(`TwelveData API error: ${data.message}`);
+          }
+          if (!data.values || !Array.isArray(data.values)) {
+            console.warn(`[MarketProvider] No historical data returned for ${tdSymbol} (${tdInterval})`);
+            return [];
+          }
+          const nowSeconds = Math.floor(Date.now() / 1e3);
+          const candles = data.values.map((v) => ({
+            time: Math.floor((/* @__PURE__ */ new Date(v.datetime + "Z")).getTime() / 1e3),
+            open: Number(v.open),
+            high: Number(v.high),
+            low: Number(v.low),
+            close: Number(v.close),
+            volume: Number(v.volume) || 0
+          })).filter((c) => c.time <= nowSeconds).sort((a, b) => a.time - b.time);
+          return candles;
+        } catch (error) {
+          console.error(`[MarketProvider] fetchHistoricalCandles failed for ${tdSymbol}: ${error.message}`);
+          return [];
+        }
+      }
+      static async fetchMovers(params) {
+        const exchange = params.exchange || "US";
+        const name = params.name || "volume_gainers";
+        const locale = params.locale || "en";
+        const rapidApiKey = process.env.RAPIDAPI_KEY || process.env.RAPID_API_KEY;
+        if (!rapidApiKey) {
+          throw new Error("RapidAPI Key is not configured in .env");
+        }
+        const response = await axios.get("https://trading-view.p.rapidapi.com/market/get-movers", {
+          params: { exchange, name, locale },
+          headers: {
+            "Content-Type": "application/json",
+            "x-rapidapi-host": "trading-view.p.rapidapi.com",
+            "x-rapidapi-key": rapidApiKey
+          },
+          timeout: 1e4
+        });
+        const payload = response.data;
+        const symbols = Array.isArray(payload?.symbols) ? payload.symbols : [];
+        return {
+          totalCount: Number(payload?.totalCount ?? symbols.length),
+          fields: Array.isArray(payload?.fields) ? payload.fields : [],
+          symbols: symbols.map((item) => ({
+            s: item?.s,
+            f: Array.isArray(item?.f) ? item.f : []
+          })),
+          time: payload?.time
+        };
+      }
+      static getCategory(symbol) {
+        return SymbolMapper.getCategory(symbol);
+      }
+      static getAllSymbols() {
+        return SymbolMapper.getAllSymbols();
+      }
+      static getSpread(symbol) {
+        const spec = SymbolSpecification.getSync(this.normalizeSymbol(symbol));
+        return spec.spread !== void 0 ? spec.spread : 1;
+      }
+      static getDigits(symbol) {
+        const spec = SymbolSpecification.getSync(this.normalizeSymbol(symbol));
+        return spec.digits !== void 0 ? spec.digits : 5;
+      }
+    };
+  }
+});
+
+// src/models/Position.ts
+var Position_exports = {};
+__export(Position_exports, {
+  PositionModel: () => PositionModel
+});
+import mongoose8, { Schema as Schema7 } from "mongoose";
+var PositionSchema, PositionModel;
+var init_Position = __esm({
+  "src/models/Position.ts"() {
+    "use strict";
+    PositionSchema = new Schema7(
+      {
+        userId: { type: Schema7.Types.ObjectId, ref: "User", required: true },
+        symbol: { type: String, required: true },
+        type: { type: String, enum: ["BUY", "SELL"], required: true },
+        volume: { type: Number, required: true },
+        openPrice: { type: Number, required: true },
+        currentPrice: { type: Number, required: true },
+        sl: { type: Number },
+        tp: { type: Number },
+        pnl: { type: Number, default: 0 },
+        commission: { type: Number, default: 0 },
+        swap: { type: Number, default: 0 },
+        marginUsed: { type: Number, default: 0 },
+        status: { type: String, enum: ["OPEN", "CLOSED"], default: "OPEN" },
+        closePrice: { type: Number },
+        deletedAt: { type: Date },
+        isArchived: { type: Boolean, default: false }
+      },
+      { timestamps: true }
+    );
+    PositionModel = mongoose8.model("Position", PositionSchema);
+  }
+});
+
+// src/models/Order.ts
+var Order_exports = {};
+__export(Order_exports, {
+  OrderModel: () => OrderModel
+});
+import mongoose9, { Schema as Schema8 } from "mongoose";
+var OrderSchema, OrderModel;
+var init_Order = __esm({
+  "src/models/Order.ts"() {
+    "use strict";
+    OrderSchema = new Schema8(
+      {
+        userId: { type: Schema8.Types.ObjectId, ref: "User", required: true },
+        symbol: { type: String, required: true },
+        type: { type: String, enum: ["BUY", "SELL", "BUY_LIMIT", "SELL_LIMIT", "BUY_STOP", "SELL_STOP"], required: true },
+        volume: { type: Number, required: true },
+        price: { type: Number },
+        targetPrice: { type: Number, required: true },
+        sl: { type: Number },
+        tp: { type: Number },
+        status: { type: String, enum: ["PENDING", "EXECUTED", "CANCELLED"], default: "PENDING" }
+      },
+      { timestamps: true }
+    );
+    OrderModel = mongoose9.model("Order", OrderSchema);
   }
 });
 
@@ -1180,14 +1307,14 @@ var init_stopOutEngine = __esm({
 });
 
 // src/models/Notification.ts
-import mongoose9, { Schema as Schema8 } from "mongoose";
+import mongoose10, { Schema as Schema9 } from "mongoose";
 var NotificationSchema, NotificationModel;
 var init_Notification = __esm({
   "src/models/Notification.ts"() {
     "use strict";
-    NotificationSchema = new Schema8(
+    NotificationSchema = new Schema9(
       {
-        userId: { type: Schema8.Types.ObjectId, ref: "User", required: true },
+        userId: { type: Schema9.Types.ObjectId, ref: "User", required: true },
         title: { type: String, required: true },
         message: { type: String, required: true },
         type: { type: String, required: true },
@@ -1195,27 +1322,27 @@ var init_Notification = __esm({
       },
       { timestamps: true }
     );
-    NotificationModel = mongoose9.model("Notification", NotificationSchema);
+    NotificationModel = mongoose10.model("Notification", NotificationSchema);
   }
 });
 
 // src/models/AuditLog.ts
-import mongoose10, { Schema as Schema9 } from "mongoose";
+import mongoose11, { Schema as Schema10 } from "mongoose";
 var AuditLogSchema, AuditLogModel;
 var init_AuditLog = __esm({
   "src/models/AuditLog.ts"() {
     "use strict";
-    AuditLogSchema = new Schema9(
+    AuditLogSchema = new Schema10(
       {
-        adminId: { type: Schema9.Types.ObjectId, ref: "User" },
-        userId: { type: Schema9.Types.ObjectId, ref: "User" },
+        adminId: { type: Schema10.Types.ObjectId, ref: "User" },
+        userId: { type: Schema10.Types.ObjectId, ref: "User" },
         action: { type: String, required: true },
-        details: { type: Schema9.Types.Mixed },
+        details: { type: Schema10.Types.Mixed },
         ipAddress: { type: String }
       },
       { timestamps: true }
     );
-    AuditLogModel = mongoose10.model("AuditLog", AuditLogSchema);
+    AuditLogModel = mongoose11.model("AuditLog", AuditLogSchema);
   }
 });
 
@@ -1312,12 +1439,12 @@ var MarketSettings_exports = {};
 __export(MarketSettings_exports, {
   MarketSettingsModel: () => MarketSettingsModel
 });
-import mongoose11, { Schema as Schema10 } from "mongoose";
+import mongoose12, { Schema as Schema11 } from "mongoose";
 var MarketSettingsSchema, MarketSettingsModel;
 var init_MarketSettings = __esm({
   "src/models/MarketSettings.ts"() {
     "use strict";
-    MarketSettingsSchema = new Schema10(
+    MarketSettingsSchema = new Schema11(
       {
         status: { type: String, enum: ["OPEN", "CLOSED"], default: "OPEN" },
         trend: { type: String, enum: ["BULLISH", "BEARISH", "NORMAL"], default: "NORMAL" },
@@ -1327,12 +1454,12 @@ var init_MarketSettings = __esm({
         globalTradingStatus: { type: String, enum: ["ON", "OFF"], default: "ON" },
         globalGraphStatus: { type: String, enum: ["LIVE", "PAUSED"], default: "LIVE" },
         globalMarketStatus: { type: String, enum: ["OPEN", "CLOSED", "MAINTENANCE", "HOLIDAY"], default: "OPEN" },
-        lastUpdatedBy: { type: Schema10.Types.ObjectId, ref: "User" },
+        lastUpdatedBy: { type: Schema11.Types.ObjectId, ref: "User" },
         reason: { type: String }
       },
       { timestamps: true }
     );
-    MarketSettingsModel = mongoose11.model("MarketSettings", MarketSettingsSchema);
+    MarketSettingsModel = mongoose12.model("MarketSettings", MarketSettingsSchema);
   }
 });
 
@@ -1516,6 +1643,7 @@ var init_market_service = __esm({
     "use strict";
     init_marketProvider();
     init_symbolMapper();
+    init_ApiKey();
     MarketService = class {
       static CANDLE_TTL_MS = 6e4;
       static latestPriceCache = /* @__PURE__ */ new Map();
@@ -1527,8 +1655,10 @@ var init_market_service = __esm({
       static activeSymbols = [];
       static dirtySymbols = /* @__PURE__ */ new Set();
       static ws = null;
+      static binanceWs = null;
       // Limit to free plan test symbols to avoid bans
-      static WS_SYMBOLS = ["EUR/USD", "BTC/USD", "ETH/USD"];
+      static WS_SYMBOLS = ["EUR/USD"];
+      // Kept only EUR/USD for TwelveData. Crypto goes to Binance.
       static metrics = {
         providerRequests: 0,
         providerErrors: 0,
@@ -1542,10 +1672,31 @@ var init_market_service = __esm({
         if (this.isRunning) return;
         this.isRunning = true;
         console.log("[MarketService] Starting background market data refresh service");
+        try {
+          const yahooKey = await ApiKeyModel.findOne({ provider: "YAHOO" });
+          if (yahooKey) this.isYahooActive = yahooKey.status === "ACTIVE";
+        } catch (e) {
+          console.error("[MarketService] Error fetching YAHOO state on start");
+        }
         this.activeSymbols = await this.getWatchSymbols();
         this.metrics.activeSymbols = this.activeSymbols.length;
         await this.refreshQuotes(this.WS_SYMBOLS.map((s) => s.replace("/", "")));
+        const cryptoSymbols = ["BTCUSDT", "ETHUSDT", "LTCUSDT", "BCHUSDT", "XRPUSDT", "DOGEUSDT"].map((s) => s.replace("USDT", "USD"));
+        setInterval(async () => {
+          try {
+            if (this.activeSymbols.length === 0) return;
+            const nonWsSymbols = this.activeSymbols.filter(
+              (sym) => !this.WS_SYMBOLS.includes(sym) && !this.WS_SYMBOLS.includes(sym.replace("/", "")) && !cryptoSymbols.includes(sym)
+            );
+            if (nonWsSymbols.length > 0) {
+              await this.pollYahooQuotes(nonWsSymbols);
+            }
+          } catch (err) {
+            console.error("[MarketService] Yahoo polling error:", err);
+          }
+        }, 2500);
         this.connectWebSocket();
+        this.connectBinanceWebSocket();
         const symbolRefreshMs = Number(process.env.SYMBOL_REFRESH_MS) || 6e4;
         setInterval(async () => {
           try {
@@ -1556,16 +1707,49 @@ var init_market_service = __esm({
           }
         }, symbolRefreshMs);
       }
-      static connectWebSocket() {
-        const apiKey = process.env.TWELVEDATA_API_KEY;
+      static currentTwelveDataKeyId = null;
+      static async reloadProvider(provider) {
+        if (provider === "TWELVEDATA") {
+          console.log("[MarketService] Forcing TwelveData WebSocket reload...");
+          if (this.ws && (this.ws.readyState === 0 || this.ws.readyState === 1)) {
+            this.ws.close();
+          } else {
+            this.connectWebSocket();
+          }
+        } else if (provider === "BINANCE") {
+          console.log("[MarketService] Forcing Binance WebSocket reload...");
+          if (this.binanceWs && (this.binanceWs.readyState === 0 || this.binanceWs.readyState === 1)) {
+            this.binanceWs.close();
+          } else {
+            this.connectBinanceWebSocket();
+          }
+        } else if (provider === "YAHOO") {
+          console.log("[MarketService] Reloading Yahoo status...");
+          const keyRecord = await ApiKeyModel.findOne({ provider: "YAHOO" });
+          this.isYahooActive = keyRecord?.status === "ACTIVE";
+        }
+      }
+      static async connectWebSocket() {
+        let apiKey = null;
+        try {
+          const keyRecord = await ApiKeyModel.findOne({ provider: "TWELVEDATA", status: "ACTIVE" });
+          if (keyRecord && keyRecord.keyValue) {
+            apiKey = keyRecord.keyValue;
+            this.currentTwelveDataKeyId = keyRecord._id;
+          } else {
+            this.currentTwelveDataKeyId = null;
+          }
+        } catch (e) {
+          console.error("[MarketService] Error fetching API Key from DB:", e);
+        }
         if (!apiKey) {
-          console.warn("[MarketService] TWELVEDATA_API_KEY missing, skipping WebSocket connection");
+          console.warn("[MarketService] No ACTIVE TWELVEDATA_API_KEY found in DB, skipping WebSocket connection");
           return;
         }
         const wsUrl = `wss://ws.twelvedata.com/v1/quotes/price?apikey=${apiKey}`;
         this.ws = new WebSocket(wsUrl);
         this.ws.on("open", () => {
-          console.log("[MarketService] TwelveData WebSocket connected");
+          console.log(`[MarketService] TwelveData WebSocket connected`);
           const subscribeMsg = {
             action: "subscribe",
             params: {
@@ -1581,6 +1765,24 @@ var init_market_service = __esm({
               await this.handleTick(message);
             } else if (message.event === "subscribe-status") {
               console.log("[MarketService] WS Subscribe Status:", message);
+              if (message.status === "error" && message.fails) {
+                const hasLimitError = message.fails.some(
+                  (f) => f.message && (f.message.toLowerCase().includes("limit") || f.message.toLowerCase().includes("quota") || f.message.toLowerCase().includes("plan"))
+                );
+                if (hasLimitError && this.currentTwelveDataKeyId) {
+                  console.warn("[MarketService] TwelveData API Limit reached! Marking key as EXHAUSTED and rotating...");
+                  await ApiKeyModel.findByIdAndUpdate(this.currentTwelveDataKeyId, { status: "EXHAUSTED", errorCount: 1 });
+                  this.ws?.close();
+                }
+              }
+            } else if (message.event === "error") {
+              if (message.message && (message.message.toLowerCase().includes("limit") || message.message.toLowerCase().includes("quota") || message.message.toLowerCase().includes("plan"))) {
+                console.warn("[MarketService] TwelveData API Limit reached (Global Error)! Marking key as EXHAUSTED and rotating...");
+                if (this.currentTwelveDataKeyId) {
+                  await ApiKeyModel.findByIdAndUpdate(this.currentTwelveDataKeyId, { status: "EXHAUSTED", errorCount: 1 });
+                }
+                this.ws?.close();
+              }
             }
           } catch (err) {
             console.error("[MarketService] WS message error:", err);
@@ -1603,9 +1805,13 @@ var init_market_service = __esm({
           const quote = existingCached.value;
           const changed = quote.price !== newPrice;
           if (changed) {
+            const spreadPips = MarketProvider.getSpread(normalized);
+            const digits = MarketProvider.getDigits(normalized);
+            const pipSize = digits === 2 || digits === 3 ? 0.01 : 1e-4;
+            const spreadValue = spreadPips * pipSize;
             quote.price = newPrice;
-            quote.bid = newPrice;
-            quote.ask = newPrice;
+            quote.bid = Number(newPrice.toFixed(6));
+            quote.ask = Number((newPrice + spreadValue).toFixed(6));
             if (newPrice > quote.high) quote.high = newPrice;
             if (newPrice < quote.low) quote.low = newPrice;
             quote.timestamp = Date.now();
@@ -1632,6 +1838,91 @@ var init_market_service = __esm({
             })();
             this.quotePromises.set(normalized, fetchPromise);
           }
+        }
+      }
+      static async connectBinanceWebSocket() {
+        try {
+          const keyRecord = await ApiKeyModel.findOne({ provider: "BINANCE" });
+          if (keyRecord && keyRecord.status !== "ACTIVE") {
+            console.warn("[MarketService] BINANCE provider is INACTIVE, skipping connection");
+            return;
+          }
+        } catch (e) {
+          console.error("[MarketService] Error fetching Binance Key from DB:", e);
+        }
+        const cryptoSymbols = ["BTCUSDT", "ETHUSDT", "LTCUSDT", "BCHUSDT", "XRPUSDT", "DOGEUSDT"];
+        const streams = cryptoSymbols.map((s) => s.toLowerCase() + "@ticker").join("/");
+        const wsUrl = `wss://stream.binance.com:9443/stream?streams=${streams}`;
+        this.binanceWs = new WebSocket(wsUrl);
+        this.binanceWs.on("open", () => {
+          console.log("[MarketService] Binance WebSocket connected (FREE CRYPTO)");
+        });
+        this.binanceWs.on("message", async (data) => {
+          try {
+            const message = JSON.parse(data.toString());
+            if (message.data && message.data.c) {
+              const s = message.data.s;
+              let symbol = s.replace("USDT", "USD");
+              await this.handleBinanceTick(symbol, message.data);
+            }
+          } catch (err) {
+          }
+        });
+        this.binanceWs.on("close", () => {
+          console.log("[MarketService] Binance WebSocket closed. Reconnecting in 5s...");
+          setTimeout(() => this.connectBinanceWebSocket(), 5e3);
+        });
+        this.binanceWs.on("error", (err) => {
+          console.error("[MarketService] Binance WebSocket error:", err);
+        });
+      }
+      static async handleBinanceTick(symbol, tick) {
+        const normalized = this.normalizeSymbol(symbol);
+        if (!normalized) return;
+        const existingCached = this.latestPriceCache.get(normalized);
+        const newPrice = Number(tick.c);
+        if (existingCached) {
+          const quote = existingCached.value;
+          const changed = quote.price !== newPrice;
+          if (changed) {
+            quote.price = newPrice;
+            quote.bid = Number(tick.b) || newPrice;
+            quote.ask = Number(tick.a) || newPrice;
+            quote.high = Number(tick.h) || quote.high;
+            quote.low = Number(tick.l) || quote.low;
+            quote.open = Number(tick.o) || quote.open;
+            quote.change = newPrice - quote.open;
+            quote.changePercent = quote.open !== 0 ? quote.change / quote.open * 100 : 0;
+            quote.volume = Number(tick.v) || quote.volume;
+            quote.timestamp = Date.now();
+            existingCached.isStale = false;
+            this.dirtySymbols.add(normalized);
+            this.metrics.lastSuccessfulUpdate = Date.now();
+            const { PriceEngine: PriceEngine2 } = await Promise.resolve().then(() => (init_priceEngine(), priceEngine_exports));
+            PriceEngine2.scheduleProcessing();
+          }
+        } else {
+          const quote = {
+            symbol: normalized,
+            price: newPrice,
+            bid: Number(tick.b) || newPrice,
+            ask: Number(tick.a) || newPrice,
+            spread: 0,
+            high: Number(tick.h) || newPrice,
+            low: Number(tick.l) || newPrice,
+            open: Number(tick.o) || newPrice,
+            previousClose: Number(tick.o) || newPrice,
+            change: newPrice - (Number(tick.o) || newPrice),
+            changePercent: tick.P ? Number(tick.P) : 0,
+            category: "CRYPTO",
+            marketStatus: "OPEN",
+            volume: Number(tick.v) || 0,
+            timestamp: Date.now()
+          };
+          this.latestPriceCache.set(normalized, { value: quote, timestamp: Date.now(), isStale: false });
+          this.dirtySymbols.add(normalized);
+          const { PriceEngine: PriceEngine2 } = await Promise.resolve().then(() => (init_priceEngine(), priceEngine_exports));
+          PriceEngine2.scheduleProcessing();
         }
       }
       // Adjusted to only fetch a limited set of symbols to respect API rate limits
@@ -1683,6 +1974,45 @@ var init_market_service = __esm({
           this.isRefreshing = false;
         }
       }
+      static isYahooActive = true;
+      static async pollYahooQuotes(symbolsToFetch) {
+        if (!this.isYahooActive) return;
+        try {
+          await Promise.all(
+            symbolsToFetch.map(async (symbol) => {
+              const normalized = this.normalizeSymbol(symbol);
+              if (!normalized) return;
+              try {
+                this.metrics.providerRequests++;
+                const quote = await MarketProvider.fetchYahooQuote(normalized);
+                let changed = false;
+                const existingCached = this.latestPriceCache.get(normalized);
+                if (existingCached) {
+                  const previous = existingCached.value;
+                  if (previous.price !== quote.price || previous.bid !== quote.bid || previous.ask !== quote.ask || previous.high !== quote.high || previous.low !== quote.low || previous.open !== quote.open) {
+                    this.dirtySymbols.add(normalized);
+                    changed = true;
+                  }
+                } else {
+                  this.dirtySymbols.add(normalized);
+                  changed = true;
+                }
+                this.latestPriceCache.set(normalized, { value: quote, timestamp: Date.now(), isStale: false });
+                this.metrics.lastSuccessfulUpdate = Date.now();
+                if (changed) {
+                  const { PriceEngine: PriceEngine2 } = await Promise.resolve().then(() => (init_priceEngine(), priceEngine_exports));
+                  PriceEngine2.scheduleProcessing();
+                }
+              } catch (error) {
+                this.metrics.providerErrors++;
+                console.warn(`[MarketService] Yahoo fetch failed for ${normalized}: ${error.message}`);
+              }
+            })
+          );
+        } catch (err) {
+          console.error("[MarketService] pollYahooQuotes error:", err);
+        }
+      }
       static normalizeSymbol(symbol) {
         return SymbolMapper.normalizeSymbol(symbol);
       }
@@ -1715,11 +2045,17 @@ var init_market_service = __esm({
         const normalized = this.normalizeSymbol(symbol);
         if (!normalized) return null;
         try {
-          const quote = await MarketProvider.fetchQuote(normalized);
+          const quote = await MarketProvider.fetchYahooQuote(normalized);
           this.latestPriceCache.set(normalized, { value: quote, timestamp: Date.now(), isStale: false });
           return quote;
         } catch (e) {
-          return null;
+          try {
+            const quote = await MarketProvider.fetchQuote(normalized);
+            this.latestPriceCache.set(normalized, { value: quote, timestamp: Date.now(), isStale: false });
+            return quote;
+          } catch (err2) {
+            return null;
+          }
         }
       }
       static getCachedQuote(symbol) {
@@ -1817,15 +2153,15 @@ var TradeHistory_exports = {};
 __export(TradeHistory_exports, {
   TradeHistoryModel: () => TradeHistoryModel
 });
-import mongoose21, { Schema as Schema19 } from "mongoose";
+import mongoose22, { Schema as Schema20 } from "mongoose";
 var TradeHistorySchema, TradeHistoryModel;
 var init_TradeHistory = __esm({
   "src/models/TradeHistory.ts"() {
     "use strict";
-    TradeHistorySchema = new Schema19(
+    TradeHistorySchema = new Schema20(
       {
-        userId: { type: Schema19.Types.ObjectId, ref: "User", required: true },
-        positionId: { type: Schema19.Types.ObjectId, ref: "Position", required: true },
+        userId: { type: Schema20.Types.ObjectId, ref: "User", required: true },
+        positionId: { type: Schema20.Types.ObjectId, ref: "Position", required: true },
         symbol: { type: String, required: true },
         type: { type: String, enum: ["BUY", "SELL"], required: true },
         volume: { type: Number, required: true },
@@ -1838,7 +2174,7 @@ var init_TradeHistory = __esm({
       },
       { timestamps: true }
     );
-    TradeHistoryModel = mongoose21.model("TradeHistory", TradeHistorySchema);
+    TradeHistoryModel = mongoose22.model("TradeHistory", TradeHistorySchema);
   }
 });
 
@@ -2221,10 +2557,10 @@ import { Router as Router3 } from "express";
 init_Wallet();
 
 // src/models/Transaction.ts
-import mongoose12, { Schema as Schema11 } from "mongoose";
-var TransactionSchema = new Schema11(
+import mongoose13, { Schema as Schema12 } from "mongoose";
+var TransactionSchema = new Schema12(
   {
-    userId: { type: Schema11.Types.ObjectId, required: true, ref: "User" },
+    userId: { type: Schema12.Types.ObjectId, required: true, ref: "User" },
     type: { type: String, enum: ["DEPOSIT", "WITHDRAW", "TRADE", "BONUS", "TRADE_LOSS", "ADMIN_ADJUSTMENT", "WITHDRAWAL"], required: true },
     amount: { type: Number, required: true },
     balanceAfter: { type: Number },
@@ -2237,7 +2573,7 @@ var TransactionSchema = new Schema11(
   },
   { timestamps: true }
 );
-var TransactionModel = mongoose12.model("Transaction", TransactionSchema);
+var TransactionModel = mongoose13.model("Transaction", TransactionSchema);
 
 // src/controllers/walletController.ts
 init_socketServer();
@@ -2295,10 +2631,10 @@ var walletRoutes_default = router3;
 import { Router as Router4 } from "express";
 
 // src/models/Deposit.ts
-import mongoose13, { Schema as Schema12 } from "mongoose";
-var DepositSchema = new Schema12(
+import mongoose14, { Schema as Schema13 } from "mongoose";
+var DepositSchema = new Schema13(
   {
-    userId: { type: Schema12.Types.ObjectId, required: true, ref: "User" },
+    userId: { type: Schema13.Types.ObjectId, required: true, ref: "User" },
     amount: { type: Number, required: true },
     currency: { type: String, required: true, default: "USD" },
     paymentMethod: { type: String, enum: ["UPI", "NETBANKING"], required: true, default: "UPI" },
@@ -2309,7 +2645,7 @@ var DepositSchema = new Schema12(
     remarks: { type: String },
     exchangeRate: { type: Number },
     creditedUSD: { type: Number },
-    approvedBy: { type: Schema12.Types.ObjectId, ref: "User" },
+    approvedBy: { type: Schema13.Types.ObjectId, ref: "User" },
     approvedAt: { type: Date },
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date },
@@ -2317,7 +2653,7 @@ var DepositSchema = new Schema12(
   },
   { timestamps: true }
 );
-var DepositModel = mongoose13.model("Deposit", DepositSchema);
+var DepositModel = mongoose14.model("Deposit", DepositSchema);
 
 // src/controllers/depositController.ts
 init_socketServer();
@@ -2421,13 +2757,13 @@ var depositRoutes_default = router4;
 import express from "express";
 
 // src/models/Withdrawal.ts
-import mongoose14, { Schema as Schema13 } from "mongoose";
-var WithdrawalSchema = new Schema13(
+import mongoose15, { Schema as Schema14 } from "mongoose";
+var WithdrawalSchema = new Schema14(
   {
-    userId: { type: Schema13.Types.ObjectId, ref: "User", required: true },
+    userId: { type: Schema14.Types.ObjectId, ref: "User", required: true },
     amount: { type: Number, required: true },
     currency: { type: String, enum: ["USD", "INR", "EUR"], default: "USD" },
-    bankDetails: { type: Schema13.Types.Mixed, required: true },
+    bankDetails: { type: Schema14.Types.Mixed, required: true },
     status: { type: String, enum: ["PENDING", "APPROVED", "REJECTED"], default: "PENDING" },
     adminNotes: { type: String },
     exchangeRate: { type: Number },
@@ -2438,7 +2774,7 @@ var WithdrawalSchema = new Schema13(
   },
   { timestamps: true }
 );
-var WithdrawalModel = mongoose14.model("Withdrawal", WithdrawalSchema);
+var WithdrawalModel = mongoose15.model("Withdrawal", WithdrawalSchema);
 
 // src/controllers/withdrawalController.ts
 init_Wallet();
@@ -2519,7 +2855,7 @@ import path3 from "path";
 import fs3 from "fs";
 
 // src/controllers/kycController.ts
-import mongoose15 from "mongoose";
+import mongoose16 from "mongoose";
 init_User();
 import path2 from "path";
 import fs2 from "fs";
@@ -2574,7 +2910,7 @@ var submitKyc = async (req, res) => {
     }
     let userId;
     try {
-      userId = new mongoose15.Types.ObjectId(rawUserId);
+      userId = new mongoose16.Types.ObjectId(rawUserId);
       console.log("[KYC POST] Converted userId:", userId);
     } catch (err) {
       console.error("[KYC POST] ObjectId conversion failed:", err);
@@ -2687,7 +3023,7 @@ var submitKyc = async (req, res) => {
 var getKyc = async (req, res) => {
   try {
     const rawUserId = req.user.id;
-    const userId = new mongoose15.Types.ObjectId(rawUserId);
+    const userId = new mongoose16.Types.ObjectId(rawUserId);
     console.log(`[KYC GET] Request for user ${userId}`);
     let kyc = await KycModel.findOne({ userId });
     const user = await UserModel.findById(userId);
@@ -2740,7 +3076,7 @@ var uploadKycFiles = async (req, res) => {
     try {
       const rawUserId = req.user?.id;
       if (rawUserId) {
-        const userId = new mongoose15.Types.ObjectId(rawUserId);
+        const userId = new mongoose16.Types.ObjectId(rawUserId);
         let kyc = await KycModel.findOne({ userId });
         if (!kyc) {
           kyc = await KycModel.create({ userId, documents: fileUrls, status: "PENDING" });
@@ -3083,18 +3419,18 @@ var tradingRoutes_default = router7;
 import express2 from "express";
 
 // src/models/CopyTrader.ts
-import mongoose16, { Schema as Schema14 } from "mongoose";
-var CopyTraderSchema = new Schema14(
+import mongoose17, { Schema as Schema15 } from "mongoose";
+var CopyTraderSchema = new Schema15(
   {
-    providerId: { type: Schema14.Types.ObjectId, ref: "User", required: true },
-    followerId: { type: Schema14.Types.ObjectId, ref: "User", required: true },
+    providerId: { type: Schema15.Types.ObjectId, ref: "User", required: true },
+    followerId: { type: Schema15.Types.ObjectId, ref: "User", required: true },
     allocationRatio: { type: Number, default: 1 },
     profitSharePercent: { type: Number, default: 20 },
     status: { type: String, enum: ["ACTIVE", "PAUSED", "STOPPED"], default: "ACTIVE" }
   },
   { timestamps: true }
 );
-var CopyTraderModel = mongoose16.model("CopyTrader", CopyTraderSchema);
+var CopyTraderModel = mongoose17.model("CopyTrader", CopyTraderSchema);
 
 // src/controllers/copyTradingController.ts
 init_User();
@@ -3150,15 +3486,15 @@ var copyTradingRoutes_default = router8;
 import { Router as Router7 } from "express";
 
 // src/models/Watchlist.ts
-import mongoose17, { Schema as Schema15 } from "mongoose";
-var WatchlistSchema = new Schema15(
+import mongoose18, { Schema as Schema16 } from "mongoose";
+var WatchlistSchema = new Schema16(
   {
-    userId: { type: Schema15.Types.ObjectId, ref: "User", required: true, unique: true },
+    userId: { type: Schema16.Types.ObjectId, ref: "User", required: true, unique: true },
     symbols: [{ type: String }]
   },
   { timestamps: true }
 );
-var WatchlistModel = mongoose17.model("Watchlist", WatchlistSchema);
+var WatchlistModel = mongoose18.model("Watchlist", WatchlistSchema);
 
 // src/controllers/watchlistController.ts
 var getWatchlist = async (req, res) => {
@@ -3201,10 +3537,10 @@ var watchlistRoutes_default = router9;
 import { Router as Router8 } from "express";
 
 // src/models/Alert.ts
-import mongoose18, { Schema as Schema16 } from "mongoose";
-var AlertSchema = new Schema16(
+import mongoose19, { Schema as Schema17 } from "mongoose";
+var AlertSchema = new Schema17(
   {
-    userId: { type: Schema16.Types.ObjectId, ref: "User", required: true },
+    userId: { type: Schema17.Types.ObjectId, ref: "User", required: true },
     symbol: { type: String, required: true },
     condition: { type: String, enum: ["ABOVE", "BELOW"], required: true },
     targetPrice: { type: Number, required: true },
@@ -3216,7 +3552,7 @@ AlertSchema.index(
   { userId: 1, symbol: 1, condition: 1, targetPrice: 1 },
   { unique: true, partialFilterExpression: { status: "ACTIVE" } }
 );
-var AlertModel = mongoose18.model("Alert", AlertSchema);
+var AlertModel = mongoose19.model("Alert", AlertSchema);
 
 // src/controllers/alertController.ts
 var getAlerts = async (req, res) => {
@@ -3298,19 +3634,19 @@ init_Notification();
 init_Symbol();
 
 // src/models/News.ts
-import mongoose19, { Schema as Schema17 } from "mongoose";
-var NewsSchema = new Schema17(
+import mongoose20, { Schema as Schema18 } from "mongoose";
+var NewsSchema = new Schema18(
   {
     title: { type: String, required: true },
     summary: { type: String, required: true },
     content: { type: String, required: true },
     category: { type: String, required: true, default: "global" },
     source: { type: String, required: true },
-    authorId: { type: Schema17.Types.ObjectId, ref: "User", required: true }
+    authorId: { type: Schema18.Types.ObjectId, ref: "User", required: true }
   },
   { timestamps: true }
 );
-var NewsModel = mongoose19.model("News", NewsSchema);
+var NewsModel = mongoose20.model("News", NewsSchema);
 
 // src/controllers/adminController.ts
 init_marginEngine();
@@ -3318,21 +3654,23 @@ init_socketServer();
 import bcrypt2 from "bcryptjs";
 
 // src/models/ExchangeRate.ts
-import mongoose20, { Schema as Schema18 } from "mongoose";
-var ExchangeRateSchema = new Schema18(
+import mongoose21, { Schema as Schema19 } from "mongoose";
+var ExchangeRateSchema = new Schema19(
   {
     currentRate: { type: Number, required: true },
     baseCurrency: { type: String, required: true, default: "USD" },
     quoteCurrency: { type: String, required: true, default: "INR" },
     provider: { type: String, enum: ["MANUAL", "LIVE"], default: "MANUAL" },
     isActive: { type: Boolean, default: true },
-    updatedBy: { type: Schema18.Types.ObjectId, ref: "User" }
+    updatedBy: { type: Schema19.Types.ObjectId, ref: "User" }
   },
   { timestamps: true }
 );
-var ExchangeRateModel = mongoose20.model("ExchangeRate", ExchangeRateSchema);
+var ExchangeRateModel = mongoose21.model("ExchangeRate", ExchangeRateSchema);
 
 // src/controllers/adminController.ts
+init_ApiKey();
+init_market_service();
 var buildPublicUploadUrl = (value, request) => {
   if (!value || typeof value !== "string") return value;
   const trimmed = value.trim();
@@ -4085,6 +4423,73 @@ var getHistoryRecords = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+var getApiKeys = async (req, res) => {
+  try {
+    let keys = await ApiKeyModel.find().sort({ createdAt: -1 });
+    if (keys.length === 0) {
+      const defaultKeys = [
+        { provider: "BINANCE", keyName: "Default System (Free)", keyValue: "No Key Required", status: "ACTIVE" },
+        { provider: "YAHOO", keyName: "Default System (Free)", keyValue: "No Key Required", status: "ACTIVE" },
+        { provider: "TWELVEDATA", keyName: "Environment Default", keyValue: process.env.TWELVEDATA_API_KEY || "19dea2e7729b4d81ad2271d8048ddc8e", status: "ACTIVE" }
+      ];
+      await ApiKeyModel.insertMany(defaultKeys);
+      keys = await ApiKeyModel.find().sort({ createdAt: -1 });
+    }
+    res.json(keys);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+var addApiKey = async (req, res) => {
+  try {
+    const { provider, keyName, keyValue } = req.body;
+    if (!provider || !keyName) {
+      return res.status(400).json({ error: "Provider and Key Name are required" });
+    }
+    const newKey = await ApiKeyModel.create({
+      provider,
+      keyName,
+      keyValue: keyValue || "",
+      status: "ACTIVE"
+    });
+    await logAdminAction(req.user.id, "API_KEY_ADDED", { provider, keyName });
+    res.status(201).json(newKey);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+var toggleApiKey = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const key = await ApiKeyModel.findById(id);
+    if (!key) return res.status(404).json({ error: "API Key not found" });
+    if (status && ["ACTIVE", "INACTIVE"].includes(status)) {
+      key.status = status;
+      if (status === "ACTIVE") key.errorCount = 0;
+    } else {
+      key.status = key.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
+      if (key.status === "ACTIVE") key.errorCount = 0;
+    }
+    await key.save();
+    await logAdminAction(req.user.id, "API_KEY_TOGGLED", { keyId: id, status: key.status });
+    await MarketService.reloadProvider(key.provider);
+    res.json(key);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+var deleteApiKey = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const key = await ApiKeyModel.findByIdAndDelete(id);
+    if (!key) return res.status(404).json({ error: "API Key not found" });
+    await logAdminAction(req.user.id, "API_KEY_DELETED", { keyId: id });
+    res.json({ message: "API Key deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
 
 // src/controllers/adminDepositController.ts
 init_Wallet();
@@ -4272,17 +4677,21 @@ router11.delete("/history/:type/:id/hard", hardDeleteRecord);
 router11.delete("/users/:id/history", clearUserHistory);
 router11.post("/wallet", adminWalletControl);
 router11.post("/user", adminUserControl);
+router11.get("/apikeys", getApiKeys);
+router11.post("/apikeys", addApiKey);
+router11.patch("/apikeys/:id/toggle", toggleApiKey);
+router11.delete("/apikeys/:id", deleteApiKey);
 var adminRoutes_default = router11;
 
 // src/routes/paymentSettingsRoutes.ts
 import { Router as Router10 } from "express";
 
 // src/models/PaymentSettings.ts
-import mongoose22, { Schema as Schema20 } from "mongoose";
-var PaymentSettingsSchema = new Schema20(
+import mongoose23, { Schema as Schema21 } from "mongoose";
+var PaymentSettingsSchema = new Schema21(
   {
-    upiEnabled: { type: Boolean, default: false },
-    bankEnabled: { type: Boolean, default: false },
+    upiEnabled: { type: Boolean, default: true },
+    bankEnabled: { type: Boolean, default: true },
     merchantName: { type: String, default: "" },
     upiId: { type: String, default: "demo@upi" },
     qrImage: { type: String, default: "" },
@@ -4296,11 +4705,11 @@ var PaymentSettingsSchema = new Schema20(
     branch: { type: String, default: "" },
     accountType: { type: String, default: "" },
     instructions: { type: String, default: "" },
-    updatedBy: { type: Schema20.Types.ObjectId, ref: "User" }
+    updatedBy: { type: Schema21.Types.ObjectId, ref: "User" }
   },
   { timestamps: true }
 );
-var PaymentSettingsModel = mongoose22.model("PaymentSettings", PaymentSettingsSchema);
+var PaymentSettingsModel = mongoose23.model("PaymentSettings", PaymentSettingsSchema);
 
 // src/controllers/paymentSettingsController.ts
 import path4 from "path";
