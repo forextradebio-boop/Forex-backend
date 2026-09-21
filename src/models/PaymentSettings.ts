@@ -23,8 +23,8 @@ export interface IPaymentSettings extends Document {
 
 const PaymentSettingsSchema = new Schema<IPaymentSettings>(
   {
-    upiEnabled: { type: Boolean, default: false },
-    bankEnabled: { type: Boolean, default: false },
+    upiEnabled: { type: Boolean, default: true },
+    bankEnabled: { type: Boolean, default: true },
     merchantName: { type: String, default: '' },
     upiId: { type: String, default: 'demo@upi' },
     qrImage: { type: String, default: '' },

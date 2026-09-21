@@ -31,7 +31,12 @@ import {
   archiveRecord,
   restoreRecord,
   softDeleteRecord,
-  hardDeleteRecord
+  softDeleteRecord,
+  hardDeleteRecord,
+  getApiKeys,
+  addApiKey,
+  toggleApiKey,
+  deleteApiKey
 } from '../controllers/adminController';
 import {
   getAllDeposits,
@@ -109,5 +114,11 @@ router.delete('/users/:id/history', clearUserHistory);
 // Control Actions
 router.post('/wallet', adminWalletControl);
 router.post('/user', adminUserControl);
+
+// API Key Management
+router.get('/apikeys', getApiKeys);
+router.post('/apikeys', addApiKey);
+router.patch('/apikeys/:id/toggle', toggleApiKey);
+router.delete('/apikeys/:id', deleteApiKey);
 
 export default router;

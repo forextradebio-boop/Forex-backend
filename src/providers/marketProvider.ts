@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { SymbolMapper } from './symbolMapper';
 import { SymbolSpecification } from '../engine/SymbolSpecification';
+import { ApiKeyModel } from '../models/ApiKey';
 
 interface CandlePoint {
   time: number;
@@ -45,7 +46,11 @@ export class MarketProvider {
       'XAUUSD': 'XAU/USD',
       'XAGUSD': 'XAG/USD',
       'BTCUSD': 'BTC/USD',
-      'ETHUSD': 'ETH/USD'
+      'ETHUSD': 'ETH/USD',
+      'LTCUSD': 'LTC/USD',
+      'XRPUSD': 'XRP/USD',
+      'DOGEUSD': 'DOGE/USD',
+      'BCHUSD': 'BCH/USD'
     };
     
     if (map[normalized]) return map[normalized];
@@ -77,7 +82,6 @@ export class MarketProvider {
       case 'd1':
       case '1d': return '1day';
       case '1wk': return '1week';
-      case '1mo': return '1month';
       case '1mo': return '1month';
       default: return '1day';
     }
@@ -115,49 +119,59 @@ export class MarketProvider {
     return normalized;
   }
 
+  private static yahooFinanceInstance: any = null;
+
   public static async fetchYahooQuote(symbol: string): Promise<QuotePayload> {
     const normalized = this.normalizeSymbol(symbol);
     const yfSymbol = this.getYahooSymbol(normalized);
-    const host = process.env.RAPID_API_HOST || 'query1.finance.yahoo.com';
-    const url = `https://${host}/v7/finance/quote?symbols=${yfSymbol}`;
     
-    const response = await axios.get(url, { 
-      timeout: 8000,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        'Accept': 'application/json'
-      }
-    });
-    const payload = response.data?.quoteResponse?.result?.[0];
-    
-    if (!payload) {
-      throw new Error(`Invalid Yahoo response for ${symbol}`);
+    if (!this.yahooFinanceInstance) {
+      const yahooFinanceLib = (await import('yahoo-finance2')).default;
+      this.yahooFinanceInstance = new (yahooFinanceLib as any)({ suppressNotices: ['yahooSurvey'] });
     }
-
-    const price = Number(payload.regularMarketPrice);
-    const previousClose = Number(payload.regularMarketPreviousClose);
     
-    return {
-      symbol: normalized,
-      price: price,
-      bid: Number(payload.bid || price),
-      ask: Number(payload.ask || price),
-      spread: 0,
-      high: Number(payload.regularMarketDayHigh || price),
-      low: Number(payload.regularMarketDayLow || price),
-      open: Number(payload.regularMarketOpen || price),
-      previousClose: previousClose,
-      change: Number(payload.regularMarketChange || 0),
-      changePercent: Number(payload.regularMarketChangePercent || 0),
-      category: SymbolMapper.getCategory(normalized),
-      marketStatus: payload.marketState === 'REGULAR' ? 'OPEN' : 'CLOSED',
-      volume: Number(payload.regularMarketVolume || 0),
-      timestamp: Date.now(),
-    };
+    try {
+      const payload = await this.yahooFinanceInstance.quote(yfSymbol);
+      
+      if (!payload) {
+        throw new Error(`Invalid Yahoo response for ${symbol}`);
+      }
+
+      const price = Number(payload.regularMarketPrice);
+      const previousClose = Number(payload.regularMarketPreviousClose || price);
+      
+      return {
+        symbol: normalized,
+        price: price,
+        bid: Number(payload.bid || price),
+        ask: Number(payload.ask || price),
+        spread: 0,
+        high: Number(payload.regularMarketDayHigh || price),
+        low: Number(payload.regularMarketDayLow || price),
+        open: Number(payload.regularMarketOpen || price),
+        previousClose: previousClose,
+        change: Number(payload.regularMarketChange || 0),
+        changePercent: Number(payload.regularMarketChangePercent || 0),
+        category: SymbolMapper.getCategory(normalized),
+        marketStatus: payload.marketState === 'REGULAR' ? 'OPEN' : 'CLOSED',
+        volume: Number(payload.regularMarketVolume || 0),
+        timestamp: Date.now(),
+      };
+    } catch (e: any) {
+      throw new Error(`Yahoo Finance error for ${symbol}: ${e.message}`);
+    }
   }
 
   public static async fetchQuote(symbol: string): Promise<QuotePayload> {
-    const apiKey = process.env.TWELVEDATA_API_KEY || '19dea2e7729b4d81ad2271d8048ddc8e';
+    let apiKey = process.env.TWELVEDATA_API_KEY || '19dea2e7729b4d81ad2271d8048ddc8e';
+    try {
+      const activeKey = await ApiKeyModel.findOne({ provider: 'TWELVEDATA', status: 'ACTIVE' });
+      if (activeKey && activeKey.keyValue) {
+        apiKey = activeKey.keyValue;
+      }
+    } catch (e) {
+      console.warn('[MarketProvider] Failed to fetch active TwelveData key for REST', e);
+    }
     if (!apiKey) throw new Error('TWELVEDATA_API_KEY is not defined');
 
     const normalized = this.normalizeSymbol(symbol);
@@ -200,7 +214,15 @@ export class MarketProvider {
   }
 
   public static async fetchHistoricalCandles(symbol: string, timeframe: string = 'D1'): Promise<CandlePoint[]> {
-    const apiKey = process.env.TWELVEDATA_API_KEY || '19dea2e7729b4d81ad2271d8048ddc8e';
+    let apiKey = process.env.TWELVEDATA_API_KEY || '19dea2e7729b4d81ad2271d8048ddc8e';
+    try {
+      const activeKey = await ApiKeyModel.findOne({ provider: 'TWELVEDATA', status: 'ACTIVE' });
+      if (activeKey && activeKey.keyValue) {
+        apiKey = activeKey.keyValue;
+      }
+    } catch (e) {
+      console.warn('[MarketProvider] Failed to fetch active TwelveData key for candles', e);
+    }
     if (!apiKey) throw new Error('TWELVEDATA_API_KEY is not defined');
 
     const normalized = this.normalizeSymbol(symbol);
