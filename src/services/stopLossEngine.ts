@@ -3,21 +3,17 @@ import { PositionModel } from '../models/Position';
 import { MarginEngine } from './marginEngine';
 import { TradeUtils } from './tradeUtils';
 import { ProfitCalculator } from '../engine/ProfitCalculator';
+import { SymbolSpecification } from '../engine/SymbolSpecification';
 
 export class StopLossEngine {
   static async evaluatePositions(positions: any[], prices: Record<string, any>) {
     const closedPositions = [];
 
-    // Pre-fetch all symbols for accurate contract sizes
-    const { SymbolModel } = await import('../models/Symbol');
-    const allSymbols = await SymbolModel.find({});
-    const symbolMap = allSymbols.reduce((acc, s) => { acc[s.symbol] = s; return acc; }, {} as Record<string, any>);
 
     for (const pos of positions) {
       if (pos.status !== 'OPEN') continue;
 
-      const symSpec = symbolMap[pos.symbol.toUpperCase()];
-      const contractSize = symSpec ? symSpec.contractSize : 100000;
+
 
       const currentPriceObj = prices[pos.symbol];
       if (!currentPriceObj) continue;
@@ -56,15 +52,11 @@ export class StopLossEngine {
         );
 
         if (updatedPos) {
-          // Credit PNL to wallet balance and then recalculate margins and equity
-          const wallet = await WalletModel.findOne({ userId: pos.userId });
-          if (wallet) {
-            wallet.balance += pnl;
-            await wallet.save();
-            // Recalculate margins and equity using current open positions
-            const openPositions = await PositionModel.find({ userId: pos.userId, status: 'OPEN' });
-            await MarginEngine.calculateMargin(pos.userId.toString(), openPositions, prices);
-          }
+          // Credit PNL to wallet balance via atomic increment
+          await WalletModel.findOneAndUpdate(
+            { userId: pos.userId },
+            { $inc: { balance: pnl } }
+          );
           closedPositions.push(updatedPos);
         }
       }

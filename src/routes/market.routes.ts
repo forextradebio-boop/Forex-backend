@@ -14,7 +14,8 @@ import {
   getWatch,
   getSymbolDetail,
   getCrudeOil,
-  getCrudeOilChart
+  getCrudeOilChart,
+  getDividends
 } from '../controllers/market.controller';
 
 const router = express.Router();
@@ -49,5 +50,8 @@ router.get('/quote', getQuote);
 // Crude Oil
 router.get('/crude-oil', getCrudeOil);
 router.get('/crude-oil-chart', getCrudeOilChart);
+
+// Dividends
+router.get('/dividends', getDividends);
 
 export default router;
