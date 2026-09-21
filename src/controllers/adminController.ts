@@ -14,6 +14,8 @@ import bcrypt from 'bcryptjs';
 import { MarginEngine } from '../services/marginEngine';
 import { SocketServer } from '../services/socketServer';
 import { ExchangeRateModel } from '../models/ExchangeRate';
+import { ApiKeyModel } from '../models/ApiKey';
+import { MarketService } from '../services/market.service';
 
 const buildPublicUploadUrl = (value?: string, request?: Request) => {
   if (!value || typeof value !== 'string') return value;
@@ -919,6 +921,91 @@ export const getHistoryRecords = async (req: Request, res: Response) => {
 
     const records = await (model as any).find(query).populate('userId', 'fullName email').sort({ createdAt: -1 });
     res.json(records);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+// API Key Management Controllers
+
+export const getApiKeys = async (req: Request, res: Response) => {
+  try {
+    let keys = await ApiKeyModel.find().sort({ createdAt: -1 });
+    
+    // Seed default system providers if DB is completely empty
+    if (keys.length === 0) {
+      const defaultKeys = [
+        { provider: 'BINANCE', keyName: 'Default System (Free)', keyValue: 'No Key Required', status: 'ACTIVE' },
+        { provider: 'YAHOO', keyName: 'Default System (Free)', keyValue: 'No Key Required', status: 'ACTIVE' },
+        { provider: 'TWELVEDATA', keyName: 'Environment Default', keyValue: process.env.TWELVEDATA_API_KEY || '19dea2e7729b4d81ad2271d8048ddc8e', status: 'ACTIVE' }
+      ];
+      await ApiKeyModel.insertMany(defaultKeys);
+      keys = await ApiKeyModel.find().sort({ createdAt: -1 });
+    }
+
+    res.json(keys);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const addApiKey = async (req: Request, res: Response) => {
+  try {
+    const { provider, keyName, keyValue } = req.body;
+    
+    if (!provider || !keyName) {
+      return res.status(400).json({ error: 'Provider and Key Name are required' });
+    }
+
+    const newKey = await ApiKeyModel.create({
+      provider,
+      keyName,
+      keyValue: keyValue || '',
+      status: 'ACTIVE'
+    });
+
+    await logAdminAction((req as any).user.id, 'API_KEY_ADDED', { provider, keyName });
+    res.status(201).json(newKey);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const toggleApiKey = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    
+    const key = await ApiKeyModel.findById(id);
+    if (!key) return res.status(404).json({ error: 'API Key not found' });
+    
+    if (status && ['ACTIVE', 'INACTIVE'].includes(status)) {
+      key.status = status;
+      if (status === 'ACTIVE') key.errorCount = 0; // reset errors when re-activating
+    } else {
+      key.status = key.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+      if (key.status === 'ACTIVE') key.errorCount = 0;
+    }
+    
+    await key.save();
+    await logAdminAction((req as any).user.id, 'API_KEY_TOGGLED', { keyId: id, status: key.status });
+    
+    // Force a reconnection or reload to apply changes immediately
+    await MarketService.reloadProvider(key.provider);
+    
+    res.json(key);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const deleteApiKey = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const key = await ApiKeyModel.findByIdAndDelete(id);
+    if (!key) return res.status(404).json({ error: 'API Key not found' });
+    
+    await logAdminAction((req as any).user.id, 'API_KEY_DELETED', { keyId: id });
+    res.json({ message: 'API Key deleted successfully' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
