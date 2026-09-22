@@ -68,8 +68,14 @@ export class MarketService {
         
         const nonWsSymbols = this.activeSymbols.filter(
           sym => {
-            if (this.WS_SYMBOLS.includes(sym) || this.WS_SYMBOLS.includes(sym.replace('/', ''))) return false;
-            if (cryptoSymbols.includes(sym) && this.binanceWs && this.binanceWs.readyState === 1) return false;
+            const isCrypto = cryptoSymbols.includes(sym);
+            if (isCrypto && this.binanceWs && this.binanceWs.readyState === 1) return false;
+            
+            const isWsActive = (this.ws && this.ws.readyState === 1) || (this.finnhubWs && this.finnhubWs.readyState === 1);
+            if (!isCrypto && isWsActive) {
+               if (this.WS_SYMBOLS.includes(sym) || this.WS_SYMBOLS.includes(sym.replace('/', ''))) return false;
+            }
+            
             return true;
           }
         );
