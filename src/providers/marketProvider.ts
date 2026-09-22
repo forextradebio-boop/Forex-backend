@@ -410,6 +410,7 @@ export class MarketProvider {
     const normalized = this.normalizeSymbol(symbol);
 
     try {
+      if (providerMap['INFOWAY']) return await this.fetchInfowayCandles(normalized, timeframe, providerMap['INFOWAY']);
       if (providerMap['FINNHUB']) return await this.fetchFinnhubCandles(normalized, timeframe, providerMap['FINNHUB']);
       if (providerMap['TWELVEDATA']) return await this.fetchTwelveDataCandles(normalized, timeframe, providerMap['TWELVEDATA']);
       // Binance could be added here for crypto
@@ -432,6 +433,57 @@ export class MarketProvider {
       case '1mo': return 'M';
       default: return 'D';
     }
+  }
+
+  private static mapTimeframeToInfoway(timeframe: string): number {
+    switch (timeframe.toLowerCase()) {
+      case 'm1': case '1m': return 1;
+      case 'm5': case '5m': return 5;
+      case 'm15': case '15m': return 15;
+      case 'm30': case '30m': return 30;
+      case 'h1': case '1h': return 60;
+      case 'd1': case '1d': return 6; // Or specific daily code, fallback to 6
+      default: return 60;
+    }
+  }
+
+  public static async fetchInfowayCandles(symbol: string, timeframe: string, apiKey: string): Promise<CandlePoint[]> {
+    const normalized = this.normalizeSymbol(symbol);
+    const klineType = this.mapTimeframeToInfoway(timeframe);
+    const klineNum = 500; // fetch 500 candles
+
+    const url = `https://data.infoway.io/common/v2/batch_kline`;
+    const response = await axios.post(url, {
+      codes: normalized,
+      klineType: klineType,
+      klineNum: klineNum
+    }, {
+      headers: { 'apiKey': apiKey },
+      timeout: 10000
+    });
+    
+    const data = response.data;
+    if (data.ret !== 200 || !data.data || data.data.length === 0 || !data.data[0].respList) {
+      return [];
+    }
+
+    const respList = data.data[0].respList;
+    const candles: CandlePoint[] = [];
+
+    for (let i = 0; i < respList.length; i++) {
+      const item = respList[i];
+      candles.push({
+        time: Number(item.t),
+        open: Number(item.o),
+        high: Number(item.h),
+        low: Number(item.l),
+        close: Number(item.c),
+        volume: Number(item.v) || 0
+      });
+    }
+
+    // Sort chronologically ascending
+    return candles.sort((a, b) => a.time - b.time);
   }
 
   public static async fetchFinnhubCandles(symbol: string, timeframe: string, apiKey: string): Promise<CandlePoint[]> {
