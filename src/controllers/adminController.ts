@@ -133,6 +133,7 @@ export const rejectKyc = async (req: Request, res: Response) => {
 export const approveWithdrawal = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const { displayCurrency } = req.body;
     const withdrawal = await WithdrawalModel.findById(id);
     if (!withdrawal) return res.status(404).json({ error: 'Not found' });
 
@@ -152,7 +153,8 @@ export const approveWithdrawal = async (req: Request, res: Response) => {
         amount: withdrawal.amount,
         balanceAfter: wallet.balance,
         status: 'APPROVED',
-        description: 'Withdrawal Approved'
+        description: 'Withdrawal Approved',
+        displayCurrency: displayCurrency || 'BOTH'
       });
     }
 
@@ -160,6 +162,19 @@ export const approveWithdrawal = async (req: Request, res: Response) => {
     await sendNotification(withdrawal.userId, 'Withdrawal Approved', 'Your withdrawal has been processed.', 'SUCCESS');
 
     res.json(withdrawal);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const deleteWithdrawal = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const withdrawal = await WithdrawalModel.findByIdAndDelete(id);
+    if (!withdrawal) return res.status(404).json({ error: 'Not found' });
+
+    await logAdminAction((req as any).user.id, 'DELETE_WITHDRAWAL', { withdrawalId: id });
+    res.json({ message: 'Withdrawal deleted successfully' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
