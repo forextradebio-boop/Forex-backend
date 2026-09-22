@@ -67,14 +67,18 @@ export class MarketService {
         if (this.activeSymbols.length === 0) return;
         
         const nonWsSymbols = this.activeSymbols.filter(
-          sym => !this.WS_SYMBOLS.includes(sym) && !this.WS_SYMBOLS.includes(sym.replace('/', '')) && !cryptoSymbols.includes(sym)
+          sym => {
+            if (this.WS_SYMBOLS.includes(sym) || this.WS_SYMBOLS.includes(sym.replace('/', ''))) return false;
+            if (cryptoSymbols.includes(sym) && this.binanceWs && this.binanceWs.readyState === 1) return false;
+            return true;
+          }
         );
         
         if (nonWsSymbols.length > 0) {
-          await this.pollYahooQuotes(nonWsSymbols);
+          await this.pollRestQuotes(nonWsSymbols);
         }
       } catch (err) {
-        console.error('[MarketService] Yahoo polling error:', err);
+        console.error('[MarketService] REST polling error:', err);
       }
     }, 2500);
 
@@ -575,8 +579,7 @@ export class MarketService {
 
   private static isYahooActive = true;
 
-  private static async pollYahooQuotes(symbolsToFetch: string[]) {
-    if (!this.isYahooActive) return;
+  private static async pollRestQuotes(symbolsToFetch: string[]) {
     try {
       await Promise.all(
         symbolsToFetch.map(async (symbol) => {
@@ -585,7 +588,7 @@ export class MarketService {
 
           try {
             this.metrics.providerRequests++;
-            const quote = await MarketProvider.fetchYahooQuote(normalized);
+            const quote = await MarketProvider.fetchQuote(normalized);
             
             let changed = false;
             const existingCached = this.latestPriceCache.get(normalized);
@@ -628,12 +631,12 @@ export class MarketService {
             }
           } catch (error: any) {
              this.metrics.providerErrors++;
-             console.warn(`[MarketService] Yahoo fetch failed for ${normalized}: ${error.message}`);
+             console.warn(`[MarketService] REST fetch failed for ${normalized}: ${error.message}`);
           }
         })
       );
     } catch (err) {
-      console.error('[MarketService] pollYahooQuotes error:', err);
+      console.error('[MarketService] pollRestQuotes error:', err);
     }
   }
 
