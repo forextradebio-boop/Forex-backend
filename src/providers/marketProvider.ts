@@ -242,6 +242,52 @@ export class MarketProvider {
     };
   }
 
+  public static getCryptoApisSymbol(symbol: string): string {
+    const normalized = this.normalizeSymbol(symbol);
+    if (SymbolMapper.getCategory(normalized) === 'CRYPTO') {
+      return normalized.replace('USD', '');
+    }
+    return normalized;
+  }
+
+  public static async fetchCryptoApisQuote(symbol: string, apiKey: string): Promise<QuotePayload> {
+    const normalized = this.normalizeSymbol(symbol);
+    const apiSymbol = this.getCryptoApisSymbol(normalized);
+
+    const url = `https://api.freecryptoapi.com/v1/getData?symbol=${apiSymbol}&token=${apiKey}`;
+    const response = await axios.get(url, { timeout: 8000 });
+    const data = response.data;
+
+    if (data.status === false || !data.symbols || data.symbols.length === 0) {
+      throw new Error(`Invalid CryptoApis quote response for ${apiSymbol}`);
+    }
+
+    const item = data.symbols[0];
+    const price = Number(item.last);
+    
+    // We derive open from daily_change_percentage
+    const changePercent = Number(item.daily_change_percentage);
+    const open = price / (1 + (changePercent / 100));
+    
+    return {
+      symbol: normalized,
+      price: price,
+      bid: price,
+      ask: price,
+      spread: 0,
+      high: Number(item.highest),
+      low: Number(item.lowest),
+      open: open,
+      previousClose: open,
+      change: price - open,
+      changePercent: changePercent,
+      category: SymbolMapper.getCategory(normalized),
+      marketStatus: 'OPEN',
+      volume: 0, // Not provided directly in the same field
+      timestamp: new Date(item.date).getTime() || Date.now(),
+    };
+  }
+
   public static async fetchQuote(symbol: string): Promise<QuotePayload> {
     const activeKeys = await ApiKeyModel.find({ status: 'ACTIVE' });
     const providerMap = activeKeys.reduce((acc: Record<string, string>, key) => {
@@ -252,6 +298,7 @@ export class MarketProvider {
     const normalized = this.normalizeSymbol(symbol);
 
     try {
+      if (providerMap['CRYPTOAPIS'] && SymbolMapper.getCategory(normalized) === 'CRYPTO') return await this.fetchCryptoApisQuote(normalized, providerMap['CRYPTOAPIS']);
       if (providerMap['FINNHUB']) return await this.fetchFinnhubQuote(normalized, providerMap['FINNHUB']);
       if (providerMap['TWELVEDATA']) return await this.fetchTwelveDataQuote(normalized, providerMap['TWELVEDATA']);
       if (providerMap['BINANCE'] && SymbolMapper.getCategory(normalized) === 'CRYPTO') return await this.fetchBinanceQuote(normalized, providerMap['BINANCE']);
