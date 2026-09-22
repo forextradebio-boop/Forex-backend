@@ -1,4 +1,4 @@
-import dotenv from 'dotenv';
+import dotenv from 'dotenv'; // Trigger restart
 // Load environment variables before anything else!
 dotenv.config({ path: './.env' }); // Since this is now in the backend folder, the path is './.env'
 

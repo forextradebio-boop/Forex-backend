@@ -407,7 +407,8 @@ var init_ApiKey = __esm({
         provider: {
           type: String,
           required: true,
-          enum: ["TWELVEDATA", "FINNHUB", "BINANCE", "YAHOO"],
+          uppercase: true,
+          // Auto-capitalize custom providers
           default: "TWELVEDATA"
         },
         keyName: {
@@ -465,6 +466,20 @@ var init_marketProvider = __esm({
         if (map[normalized]) return map[normalized];
         if (normalized.length === 6 && SymbolMapper.getCategory(normalized) === "FOREX") {
           return `${normalized.substring(0, 3)}/${normalized.substring(3)}`;
+        }
+        return normalized;
+      }
+      static getFinnhubSymbol(symbol) {
+        const normalized = this.normalizeSymbol(symbol);
+        const category = SymbolMapper.getCategory(normalized);
+        if (category === "FOREX") return `OANDA:${normalized.substring(0, 3)}_${normalized.substring(3)}`;
+        if (category === "CRYPTO") return `BINANCE:${normalized.replace("USD", "USDT")}`;
+        return normalized;
+      }
+      static getBinanceSymbol(symbol) {
+        const normalized = this.normalizeSymbol(symbol);
+        if (SymbolMapper.getCategory(normalized) === "CRYPTO") {
+          return normalized.replace("USD", "USDT");
         }
         return normalized;
       }
@@ -561,17 +576,84 @@ var init_marketProvider = __esm({
           throw new Error(`Yahoo Finance error for ${symbol}: ${e.message}`);
         }
       }
-      static async fetchQuote(symbol) {
-        let apiKey = process.env.TWELVEDATA_API_KEY || "19dea2e7729b4d81ad2271d8048ddc8e";
-        try {
-          const activeKey = await ApiKeyModel.findOne({ provider: "TWELVEDATA", status: "ACTIVE" });
-          if (activeKey && activeKey.keyValue) {
-            apiKey = activeKey.keyValue;
-          }
-        } catch (e) {
-          console.warn("[MarketProvider] Failed to fetch active TwelveData key for REST", e);
+      static async fetchFinnhubQuote(symbol, apiKey) {
+        const normalized = this.normalizeSymbol(symbol);
+        const fhSymbol = this.getFinnhubSymbol(normalized);
+        const url = `https://finnhub.io/api/v1/quote?symbol=${fhSymbol}&token=${apiKey}`;
+        const response = await axios.get(url, { timeout: 8e3 });
+        const data = response.data;
+        if (data.c === 0 && data.h === 0 && data.l === 0) {
+          throw new Error(`Invalid Finnhub quote response for ${fhSymbol}`);
         }
-        if (!apiKey) throw new Error("TWELVEDATA_API_KEY is not defined");
+        const price = Number(data.c);
+        return {
+          symbol: normalized,
+          price,
+          bid: price,
+          ask: price,
+          spread: 0,
+          high: Number(data.h),
+          low: Number(data.l),
+          open: Number(data.o),
+          previousClose: Number(data.pc),
+          change: Number(data.d),
+          changePercent: Number(data.dp),
+          category: SymbolMapper.getCategory(normalized),
+          marketStatus: "OPEN",
+          volume: 0,
+          timestamp: Number(data.t) * 1e3 || Date.now()
+        };
+      }
+      static async fetchBinanceQuote(symbol, apiKey) {
+        const normalized = this.normalizeSymbol(symbol);
+        const binanceSymbol = this.getBinanceSymbol(normalized);
+        const url = `https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSymbol}`;
+        const response = await axios.get(url, { timeout: 8e3 });
+        const data = response.data;
+        const price = Number(data.lastPrice);
+        return {
+          symbol: normalized,
+          price,
+          bid: Number(data.bidPrice) || price,
+          ask: Number(data.askPrice) || price,
+          spread: 0,
+          high: Number(data.highPrice),
+          low: Number(data.lowPrice),
+          open: Number(data.openPrice),
+          previousClose: Number(data.prevClosePrice),
+          change: Number(data.priceChange),
+          changePercent: Number(data.priceChangePercent),
+          category: SymbolMapper.getCategory(normalized),
+          marketStatus: "OPEN",
+          volume: Number(data.volume),
+          timestamp: Number(data.closeTime) || Date.now()
+        };
+      }
+      static async fetchQuote(symbol) {
+        const activeKeys = await ApiKeyModel.find({ status: "ACTIVE" });
+        const providerMap = activeKeys.reduce((acc, key) => {
+          acc[key.provider] = key.keyValue;
+          return acc;
+        }, {});
+        const normalized = this.normalizeSymbol(symbol);
+        try {
+          if (providerMap["FINNHUB"]) return await this.fetchFinnhubQuote(normalized, providerMap["FINNHUB"]);
+          if (providerMap["TWELVEDATA"]) return await this.fetchTwelveDataQuote(normalized, providerMap["TWELVEDATA"]);
+          if (providerMap["BINANCE"] && SymbolMapper.getCategory(normalized) === "CRYPTO") return await this.fetchBinanceQuote(normalized, providerMap["BINANCE"]);
+          if (providerMap["YAHOO"]) return await this.fetchYahooQuote(normalized);
+        } catch (e) {
+          console.warn(`[MarketProvider] Primary fetch failed: ${e.message}, falling back...`);
+        }
+        if (providerMap["YAHOO"]) {
+          try {
+            return await this.fetchYahooQuote(normalized);
+          } catch (e) {
+            throw new Error(`[MarketProvider] All fetch attempts failed including YAHOO fallback.`);
+          }
+        }
+        throw new Error("No active API keys found for fetching quotes.");
+      }
+      static async fetchTwelveDataQuote(symbol, apiKey) {
         const normalized = this.normalizeSymbol(symbol);
         const tdSymbol = this.getTwelveDataSymbol(normalized);
         const url = `https://api.twelvedata.com/quote?symbol=${tdSymbol}&apikey=${apiKey}`;
@@ -585,13 +667,11 @@ var init_marketProvider = __esm({
         }
         const price = Number(data.close);
         const previousClose = Number(data.previous_close);
-        const parsedObject = {
+        return {
           symbol: normalized,
           price,
           bid: price,
-          // Approximate if not provided
           ask: price,
-          // Approximate if not provided
           spread: 0,
           high: Number(data.high),
           low: Number(data.low),
@@ -604,47 +684,98 @@ var init_marketProvider = __esm({
           volume: Number(data.volume) || 0,
           timestamp: Number(data.timestamp) * 1e3 || Date.now()
         };
-        return parsedObject;
       }
       static async fetchHistoricalCandles(symbol, timeframe = "D1") {
-        let apiKey = process.env.TWELVEDATA_API_KEY || "19dea2e7729b4d81ad2271d8048ddc8e";
+        const activeKeys = await ApiKeyModel.find({ status: "ACTIVE" });
+        const providerMap = activeKeys.reduce((acc, key) => {
+          acc[key.provider] = key.keyValue;
+          return acc;
+        }, {});
+        const normalized = this.normalizeSymbol(symbol);
         try {
-          const activeKey = await ApiKeyModel.findOne({ provider: "TWELVEDATA", status: "ACTIVE" });
-          if (activeKey && activeKey.keyValue) {
-            apiKey = activeKey.keyValue;
-          }
+          if (providerMap["FINNHUB"]) return await this.fetchFinnhubCandles(normalized, timeframe, providerMap["FINNHUB"]);
+          if (providerMap["TWELVEDATA"]) return await this.fetchTwelveDataCandles(normalized, timeframe, providerMap["TWELVEDATA"]);
         } catch (e) {
-          console.warn("[MarketProvider] Failed to fetch active TwelveData key for candles", e);
+          console.warn(`[MarketProvider] Candles fetch failed: ${e.message}`);
         }
-        if (!apiKey) throw new Error("TWELVEDATA_API_KEY is not defined");
+        return [];
+      }
+      static mapTimeframeToFinnhub(timeframe) {
+        switch (timeframe.toLowerCase()) {
+          case "m1":
+          case "1m":
+            return "1";
+          case "m5":
+          case "5m":
+            return "5";
+          case "m15":
+          case "15m":
+            return "15";
+          case "m30":
+          case "30m":
+            return "30";
+          case "h1":
+          case "1h":
+            return "60";
+          case "d1":
+          case "1d":
+            return "D";
+          case "1wk":
+            return "W";
+          case "1mo":
+            return "M";
+          default:
+            return "D";
+        }
+      }
+      static async fetchFinnhubCandles(symbol, timeframe, apiKey) {
+        const normalized = this.normalizeSymbol(symbol);
+        const fhSymbol = this.getFinnhubSymbol(normalized);
+        const fhResolution = this.mapTimeframeToFinnhub(timeframe);
+        const to = Math.floor(Date.now() / 1e3);
+        const from = to - 30 * 24 * 60 * 60;
+        const url = `https://finnhub.io/api/v1/stock/candle?symbol=${fhSymbol}&resolution=${fhResolution}&from=${from}&to=${to}&token=${apiKey}`;
+        const response = await axios.get(url, { timeout: 1e4 });
+        const data = response.data;
+        if (data.s !== "ok") {
+          throw new Error(`Finnhub candle error: ${data.s}`);
+        }
+        const candles = [];
+        for (let i = 0; i < data.t.length; i++) {
+          candles.push({
+            time: data.t[i],
+            open: data.o[i],
+            high: data.h[i],
+            low: data.l[i],
+            close: data.c[i],
+            volume: data.v[i]
+          });
+        }
+        return candles;
+      }
+      static async fetchTwelveDataCandles(symbol, timeframe, apiKey) {
         const normalized = this.normalizeSymbol(symbol);
         const tdSymbol = this.getTwelveDataSymbol(normalized);
         const tdInterval = this.mapTimeframeToTwelveData(timeframe);
         const url = `https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=${tdInterval}&outputsize=500&timezone=UTC&apikey=${apiKey}`;
-        try {
-          const response = await axios.get(url, { timeout: 1e4 });
-          const data = response.data;
-          if (data.code && data.status === "error") {
-            throw new Error(`TwelveData API error: ${data.message}`);
-          }
-          if (!data.values || !Array.isArray(data.values)) {
-            console.warn(`[MarketProvider] No historical data returned for ${tdSymbol} (${tdInterval})`);
-            return [];
-          }
-          const nowSeconds = Math.floor(Date.now() / 1e3);
-          const candles = data.values.map((v) => ({
-            time: Math.floor((/* @__PURE__ */ new Date(v.datetime + "Z")).getTime() / 1e3),
-            open: Number(v.open),
-            high: Number(v.high),
-            low: Number(v.low),
-            close: Number(v.close),
-            volume: Number(v.volume) || 0
-          })).filter((c) => c.time <= nowSeconds).sort((a, b) => a.time - b.time);
-          return candles;
-        } catch (error) {
-          console.error(`[MarketProvider] fetchHistoricalCandles failed for ${tdSymbol}: ${error.message}`);
+        const response = await axios.get(url, { timeout: 1e4 });
+        const data = response.data;
+        if (data.code && data.status === "error") {
+          throw new Error(`TwelveData API error: ${data.message}`);
+        }
+        if (!data.values || !Array.isArray(data.values)) {
           return [];
         }
+        const nowSeconds = Math.floor(Date.now() / 1e3);
+        const candles = data.values.map((v) => ({
+          time: Math.floor((/* @__PURE__ */ new Date(v.datetime + "Z")).getTime() / 1e3),
+          open: Number(v.open),
+          high: Number(v.high),
+          low: Number(v.low),
+          close: Number(v.close),
+          volume: Number(v.volume) || 0
+        })).filter((c) => c.time <= nowSeconds).sort((a, b) => a.time - b.time);
+        return candles;
       }
       static async fetchMovers(params) {
         const exchange = params.exchange || "US";
@@ -1656,9 +1787,9 @@ var init_market_service = __esm({
       static dirtySymbols = /* @__PURE__ */ new Set();
       static ws = null;
       static binanceWs = null;
-      // Limit to free plan test symbols to avoid bans
-      static WS_SYMBOLS = ["EUR/USD"];
-      // Kept only EUR/USD for TwelveData. Crypto goes to Binance.
+      static finnhubWs = null;
+      // Automatically populated with all non-crypto active symbols
+      static WS_SYMBOLS = [];
       static metrics = {
         providerRequests: 0,
         providerErrors: 0,
@@ -1674,14 +1805,21 @@ var init_market_service = __esm({
         console.log("[MarketService] Starting background market data refresh service");
         try {
           const yahooKey = await ApiKeyModel.findOne({ provider: "YAHOO" });
-          if (yahooKey) this.isYahooActive = yahooKey.status === "ACTIVE";
+          this.isYahooActive = yahooKey ? yahooKey.status === "ACTIVE" : false;
         } catch (e) {
           console.error("[MarketService] Error fetching YAHOO state on start");
+          this.isYahooActive = false;
         }
         this.activeSymbols = await this.getWatchSymbols();
         this.metrics.activeSymbols = this.activeSymbols.length;
-        await this.refreshQuotes(this.WS_SYMBOLS.map((s) => s.replace("/", "")));
         const cryptoSymbols = ["BTCUSDT", "ETHUSDT", "LTCUSDT", "BCHUSDT", "XRPUSDT", "DOGEUSDT"].map((s) => s.replace("USDT", "USD"));
+        this.WS_SYMBOLS = this.activeSymbols.filter((sym) => !cryptoSymbols.includes(sym)).map((sym) => {
+          if (sym.length === 6 && !sym.includes("/")) return `${sym.substring(0, 3)}/${sym.substring(3)}`;
+          if (sym === "USOIL") return "WTI";
+          if (sym === "UKOIL") return "BRENT";
+          return sym;
+        });
+        await this.refreshQuotes(this.WS_SYMBOLS.map((s) => s.replace("/", "")));
         setInterval(async () => {
           try {
             if (this.activeSymbols.length === 0) return;
@@ -1697,11 +1835,25 @@ var init_market_service = __esm({
         }, 2500);
         this.connectWebSocket();
         this.connectBinanceWebSocket();
+        this.connectFinnhubWebSocket();
         const symbolRefreshMs = Number(process.env.SYMBOL_REFRESH_MS) || 6e4;
         setInterval(async () => {
           try {
             this.activeSymbols = await this.getWatchSymbols();
             this.metrics.activeSymbols = this.activeSymbols.length;
+            const updatedWsSymbols = this.activeSymbols.filter((sym) => !cryptoSymbols.includes(sym)).map((sym) => {
+              if (sym.length === 6 && !sym.includes("/")) return `${sym.substring(0, 3)}/${sym.substring(3)}`;
+              if (sym === "USOIL") return "WTI";
+              if (sym === "UKOIL") return "BRENT";
+              return sym;
+            });
+            if (updatedWsSymbols.sort().join(",") !== this.WS_SYMBOLS.sort().join(",")) {
+              this.WS_SYMBOLS = updatedWsSymbols;
+              console.log("[MarketService] Watchlist changed, reconnecting WebSocket...");
+              if (this.ws && (this.ws.readyState === 0 || this.ws.readyState === 1)) {
+                this.ws.close();
+              }
+            }
           } catch (err) {
             console.error("[MarketService] Symbol refresh error:", err);
           }
@@ -1722,6 +1874,13 @@ var init_market_service = __esm({
             this.binanceWs.close();
           } else {
             this.connectBinanceWebSocket();
+          }
+        } else if (provider === "FINNHUB") {
+          console.log("[MarketService] Forcing Finnhub WebSocket reload...");
+          if (this.finnhubWs && (this.finnhubWs.readyState === 0 || this.finnhubWs.readyState === 1)) {
+            this.finnhubWs.close();
+          } else {
+            this.connectFinnhubWebSocket();
           }
         } else if (provider === "YAHOO") {
           console.log("[MarketService] Reloading Yahoo status...");
@@ -1747,8 +1906,9 @@ var init_market_service = __esm({
           return;
         }
         const wsUrl = `wss://ws.twelvedata.com/v1/quotes/price?apikey=${apiKey}`;
-        this.ws = new WebSocket(wsUrl);
-        this.ws.on("open", () => {
+        const ws = new WebSocket(wsUrl);
+        this.ws = ws;
+        ws.on("open", () => {
           console.log(`[MarketService] TwelveData WebSocket connected`);
           const subscribeMsg = {
             action: "subscribe",
@@ -1756,9 +1916,11 @@ var init_market_service = __esm({
               symbols: this.WS_SYMBOLS.join(",")
             }
           };
-          this.ws?.send(JSON.stringify(subscribeMsg));
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(subscribeMsg));
+          }
         });
-        this.ws.on("message", async (data) => {
+        ws.on("message", async (data) => {
           try {
             const message = JSON.parse(data.toString());
             if (message.event === "price") {
@@ -1772,7 +1934,7 @@ var init_market_service = __esm({
                 if (hasLimitError && this.currentTwelveDataKeyId) {
                   console.warn("[MarketService] TwelveData API Limit reached! Marking key as EXHAUSTED and rotating...");
                   await ApiKeyModel.findByIdAndUpdate(this.currentTwelveDataKeyId, { status: "EXHAUSTED", errorCount: 1 });
-                  this.ws?.close();
+                  ws.close();
                 }
               }
             } else if (message.event === "error") {
@@ -1781,19 +1943,26 @@ var init_market_service = __esm({
                 if (this.currentTwelveDataKeyId) {
                   await ApiKeyModel.findByIdAndUpdate(this.currentTwelveDataKeyId, { status: "EXHAUSTED", errorCount: 1 });
                 }
-                this.ws?.close();
+                ws.close();
               }
             }
           } catch (err) {
             console.error("[MarketService] WS message error:", err);
           }
         });
-        this.ws.on("close", () => {
-          console.log("[MarketService] TwelveData WebSocket closed. Reconnecting in 5s...");
-          setTimeout(() => this.connectWebSocket(), 5e3);
+        ws.on("unexpected-response", (request, response) => {
+          console.error(`[MarketService] TwelveData WebSocket unexpected response: ${response.statusCode}`);
+          if (response.statusCode === 200) {
+            console.error("[MarketService] This usually means API rate limit or plan limit reached.");
+          }
         });
-        this.ws.on("error", (err) => {
-          console.error("[MarketService] TwelveData WebSocket error:", err);
+        ws.on("close", () => {
+          console.log(`[MarketService] TwelveData WebSocket closed. Reconnecting in 10s...`);
+          if (this.ws === ws) this.ws = null;
+          setTimeout(() => this.connectWebSocket(), 1e4);
+        });
+        ws.on("error", (err) => {
+          console.error("[MarketService] TwelveData WebSocket error:", err.message);
         });
       }
       static async handleTick(tick) {
@@ -1812,6 +1981,102 @@ var init_market_service = __esm({
             quote.price = newPrice;
             quote.bid = Number(newPrice.toFixed(6));
             quote.ask = Number((newPrice + spreadValue).toFixed(6));
+            quote.spread = spreadPips;
+            if (newPrice > quote.high) quote.high = newPrice;
+            if (newPrice < quote.low) quote.low = newPrice;
+            quote.timestamp = Date.now();
+            existingCached.isStale = false;
+            this.dirtySymbols.add(normalized);
+            this.metrics.lastSuccessfulUpdate = Date.now();
+            const { PriceEngine: PriceEngine2 } = await Promise.resolve().then(() => (init_priceEngine(), priceEngine_exports));
+            PriceEngine2.scheduleProcessing();
+          }
+        } else {
+          if (!this.quotePromises.has(normalized)) {
+            const fetchPromise = (async () => {
+              try {
+                const baseQuote = await MarketProvider.fetchQuote(normalized);
+                this.latestPriceCache.set(normalized, { value: baseQuote, timestamp: Date.now(), isStale: false });
+                this.dirtySymbols.add(normalized);
+                const { PriceEngine: PriceEngine2 } = await Promise.resolve().then(() => (init_priceEngine(), priceEngine_exports));
+                PriceEngine2.scheduleProcessing();
+              } catch (err) {
+                console.warn(`[MarketService] Failed to fetch base quote for ${normalized}: ${err.message}`);
+              } finally {
+                this.quotePromises.delete(normalized);
+              }
+            })();
+            this.quotePromises.set(normalized, fetchPromise);
+          }
+        }
+      }
+      static async connectFinnhubWebSocket() {
+        let apiKey = null;
+        try {
+          const keyRecord = await ApiKeyModel.findOne({ provider: "FINNHUB", status: "ACTIVE" });
+          if (keyRecord && keyRecord.keyValue) {
+            apiKey = keyRecord.keyValue;
+          }
+        } catch (e) {
+          console.error("[MarketService] Error fetching Finnhub Key from DB:", e);
+        }
+        if (!apiKey) {
+          return;
+        }
+        const wsUrl = `wss://ws.finnhub.io?token=${apiKey}`;
+        const ws = new WebSocket(wsUrl);
+        this.finnhubWs = ws;
+        ws.on("open", () => {
+          console.log(`[MarketService] Finnhub WebSocket connected`);
+          for (const symbol of this.WS_SYMBOLS) {
+            const fhSymbol = MarketProvider.getFinnhubSymbol(symbol);
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: "subscribe", symbol: fhSymbol }));
+            }
+          }
+        });
+        ws.on("message", async (data) => {
+          try {
+            const message = JSON.parse(data.toString());
+            if (message.type === "trade" && message.data && message.data.length > 0) {
+              const trade = message.data[0];
+              let internalSymbol = trade.s;
+              if (trade.s.startsWith("OANDA:")) {
+                internalSymbol = trade.s.replace("OANDA:", "").replace("_", "");
+              } else if (trade.s.startsWith("BINANCE:")) {
+                internalSymbol = trade.s.replace("BINANCE:", "").replace("USDT", "USD");
+              }
+              await this.handleFinnhubTick(internalSymbol, trade);
+            }
+          } catch (err) {
+          }
+        });
+        ws.on("close", () => {
+          console.log("[MarketService] Finnhub WebSocket closed. Reconnecting in 5s...");
+          if (this.finnhubWs === ws) this.finnhubWs = null;
+          setTimeout(() => this.connectFinnhubWebSocket(), 5e3);
+        });
+        ws.on("error", (err) => {
+          console.error("[MarketService] Finnhub WebSocket error:", err);
+        });
+      }
+      static async handleFinnhubTick(symbol, trade) {
+        const normalized = this.normalizeSymbol(symbol);
+        if (!normalized) return;
+        const existingCached = this.latestPriceCache.get(normalized);
+        const newPrice = Number(trade.p);
+        if (existingCached) {
+          const quote = existingCached.value;
+          const changed = quote.price !== newPrice;
+          if (changed) {
+            const spreadPips = MarketProvider.getSpread(normalized);
+            const digits = MarketProvider.getDigits(normalized);
+            const pipSize = digits === 2 || digits === 3 ? 0.01 : 1e-4;
+            const spreadValue = spreadPips * pipSize;
+            quote.price = newPrice;
+            quote.bid = Number(newPrice.toFixed(6));
+            quote.ask = Number((newPrice + spreadValue).toFixed(6));
+            quote.spread = spreadPips;
             if (newPrice > quote.high) quote.high = newPrice;
             if (newPrice < quote.low) quote.low = newPrice;
             quote.timestamp = Date.now();
@@ -1843,8 +2108,8 @@ var init_market_service = __esm({
       static async connectBinanceWebSocket() {
         try {
           const keyRecord = await ApiKeyModel.findOne({ provider: "BINANCE" });
-          if (keyRecord && keyRecord.status !== "ACTIVE") {
-            console.warn("[MarketService] BINANCE provider is INACTIVE, skipping connection");
+          if (!keyRecord || keyRecord.status !== "ACTIVE") {
+            console.warn("[MarketService] BINANCE provider is INACTIVE or missing, skipping connection");
             return;
           }
         } catch (e) {
@@ -1853,11 +2118,12 @@ var init_market_service = __esm({
         const cryptoSymbols = ["BTCUSDT", "ETHUSDT", "LTCUSDT", "BCHUSDT", "XRPUSDT", "DOGEUSDT"];
         const streams = cryptoSymbols.map((s) => s.toLowerCase() + "@ticker").join("/");
         const wsUrl = `wss://stream.binance.com:9443/stream?streams=${streams}`;
-        this.binanceWs = new WebSocket(wsUrl);
-        this.binanceWs.on("open", () => {
+        const ws = new WebSocket(wsUrl);
+        this.binanceWs = ws;
+        ws.on("open", () => {
           console.log("[MarketService] Binance WebSocket connected (FREE CRYPTO)");
         });
-        this.binanceWs.on("message", async (data) => {
+        ws.on("message", async (data) => {
           try {
             const message = JSON.parse(data.toString());
             if (message.data && message.data.c) {
@@ -1868,11 +2134,12 @@ var init_market_service = __esm({
           } catch (err) {
           }
         });
-        this.binanceWs.on("close", () => {
+        ws.on("close", () => {
           console.log("[MarketService] Binance WebSocket closed. Reconnecting in 5s...");
+          if (this.binanceWs === ws) this.binanceWs = null;
           setTimeout(() => this.connectBinanceWebSocket(), 5e3);
         });
-        this.binanceWs.on("error", (err) => {
+        ws.on("error", (err) => {
           console.error("[MarketService] Binance WebSocket error:", err);
         });
       }
@@ -1888,6 +2155,7 @@ var init_market_service = __esm({
             quote.price = newPrice;
             quote.bid = Number(tick.b) || newPrice;
             quote.ask = Number(tick.a) || newPrice;
+            quote.spread = Number((quote.ask - quote.bid).toFixed(6)) * 1e4;
             quote.high = Number(tick.h) || quote.high;
             quote.low = Number(tick.l) || quote.low;
             quote.open = Number(tick.o) || quote.open;
@@ -1996,6 +2264,15 @@ var init_market_service = __esm({
                 } else {
                   this.dirtySymbols.add(normalized);
                   changed = true;
+                }
+                if (changed) {
+                  const spreadPips = MarketProvider.getSpread(normalized);
+                  const digits = MarketProvider.getDigits(normalized);
+                  const pipSize = digits === 2 || digits === 3 ? 0.01 : 1e-4;
+                  const spreadValue = spreadPips * pipSize;
+                  quote.bid = Number(quote.price.toFixed(6));
+                  quote.ask = Number((quote.price + spreadValue).toFixed(6));
+                  quote.spread = spreadPips;
                 }
                 this.latestPriceCache.set(normalized, { value: quote, timestamp: Date.now(), isStale: false });
                 this.metrics.lastSuccessfulUpdate = Date.now();
@@ -2280,10 +2557,11 @@ var connectDatabase = async () => {
       console.log("MongoDB Connected Successfully (in-memory)");
     } else {
       await mongoose.connect(config.mongoUri, {
+        dbName: "forextradebio",
         serverSelectionTimeoutMS: 5e3,
         socketTimeoutMS: 45e3
       });
-      console.log("MongoDB Connected Successfully");
+      console.log("MongoDB Connected Successfully to forextradebio database");
     }
   } catch (err) {
     console.error("MongoDB connection error:", err);
@@ -2569,7 +2847,8 @@ var TransactionSchema = new Schema12(
     description: { type: String },
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date },
-    isArchived: { type: Boolean, default: false }
+    isArchived: { type: Boolean, default: false },
+    displayCurrency: { type: String, enum: ["INR", "USDT", "BOTH"], default: "BOTH" }
   },
   { timestamps: true }
 );
@@ -3766,6 +4045,7 @@ var rejectKyc = async (req, res) => {
 var approveWithdrawal = async (req, res) => {
   try {
     const { id } = req.params;
+    const { displayCurrency } = req.body;
     const withdrawal = await WithdrawalModel.findById(id);
     if (!withdrawal) return res.status(404).json({ error: "Not found" });
     const exchangeRateDoc = await ExchangeRateModel.findOne({ isActive: true });
@@ -3782,12 +4062,24 @@ var approveWithdrawal = async (req, res) => {
         amount: withdrawal.amount,
         balanceAfter: wallet.balance,
         status: "APPROVED",
-        description: "Withdrawal Approved"
+        description: "Withdrawal Approved",
+        displayCurrency: displayCurrency || "BOTH"
       });
     }
     await logAdminAction(req.user.id, "APPROVE_WITHDRAWAL", { withdrawalId: id });
     await sendNotification(withdrawal.userId, "Withdrawal Approved", "Your withdrawal has been processed.", "SUCCESS");
     res.json(withdrawal);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+var deleteWithdrawal = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const withdrawal = await WithdrawalModel.findByIdAndDelete(id);
+    if (!withdrawal) return res.status(404).json({ error: "Not found" });
+    await logAdminAction(req.user.id, "DELETE_WITHDRAWAL", { withdrawalId: id });
+    res.json({ message: "Withdrawal deleted successfully" });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -4517,7 +4809,7 @@ var getDepositById = async (req, res) => {
 var approveDeposit = async (req, res) => {
   try {
     const { id } = req.params;
-    const { remarks, customExchangeRate } = req.body;
+    const { remarks, customExchangeRate, displayCurrency } = req.body;
     const adminId = req.user.id;
     const deposit = await DepositModel.findById(id);
     if (!deposit) {
@@ -4555,7 +4847,8 @@ var approveDeposit = async (req, res) => {
         balanceAfter: wallet.balance,
         status: "APPROVED",
         referenceId: deposit._id.toString(),
-        description: `Deposit Approved by Admin${remarks ? " - " + remarks : ""}`
+        description: `Deposit Approved by Admin${remarks ? " - " + remarks : ""}`,
+        displayCurrency: displayCurrency || "BOTH"
       });
     }
     await AuditLogModel.create({ adminId, action: "APPROVE_DEPOSIT", details: { depositId: id, remarks } });
@@ -4657,6 +4950,7 @@ router11.post("/kyc/:id/approve", approveKyc);
 router11.post("/kyc/:id/reject", rejectKyc);
 router11.post("/withdrawals/:id/approve", approveWithdrawal);
 router11.post("/withdrawals/:id/reject", rejectWithdrawal);
+router11.delete("/withdraw/:id", deleteWithdrawal);
 router11.post("/symbols", createSymbol);
 router11.post("/symbols/:symbol/status", updateSymbolStatus);
 router11.post("/symbols/:symbol/modify", modifySymbol);
