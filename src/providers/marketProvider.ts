@@ -288,6 +288,49 @@ export class MarketProvider {
     };
   }
 
+  public static async fetchInfowayQuote(symbol: string, apiKey: string): Promise<QuotePayload> {
+    const normalized = this.normalizeSymbol(symbol);
+    
+    const url = `https://data.infoway.io/common/v2/batch_kline`;
+    const response = await axios.post(url, {
+      codes: normalized,
+      klineType: 1,
+      klineNum: 1
+    }, {
+      headers: { 'apiKey': apiKey },
+      timeout: 8000
+    });
+    
+    const data = response.data;
+    if (data.ret !== 200 || !data.data || data.data.length === 0 || !data.data[0].respList || data.data[0].respList.length === 0) {
+      throw new Error(`Invalid Infoway quote response for ${normalized}`);
+    }
+
+    const item = data.data[0].respList[0];
+    const price = Number(item.c);
+    const open = Number(item.o);
+    const high = Number(item.h);
+    const low = Number(item.l);
+    
+    return {
+      symbol: normalized,
+      price: price,
+      bid: price,
+      ask: price,
+      spread: 0,
+      high: high,
+      low: low,
+      open: open,
+      previousClose: open,
+      change: Number(item.pca) || (price - open),
+      changePercent: parseFloat(item.pc) || 0,
+      category: SymbolMapper.getCategory(normalized),
+      marketStatus: 'OPEN',
+      volume: Number(item.v) || 0,
+      timestamp: Number(item.t) * 1000 || Date.now(),
+    };
+  }
+
   public static async fetchQuote(symbol: string): Promise<QuotePayload> {
     const activeKeys = await ApiKeyModel.find({ status: 'ACTIVE' });
     const providerMap = activeKeys.reduce((acc: Record<string, string>, key) => {
@@ -298,6 +341,7 @@ export class MarketProvider {
     const normalized = this.normalizeSymbol(symbol);
 
     try {
+      if (providerMap['INFOWAY']) return await this.fetchInfowayQuote(normalized, providerMap['INFOWAY']);
       if (providerMap['CRYPTOAPIS'] && SymbolMapper.getCategory(normalized) === 'CRYPTO') return await this.fetchCryptoApisQuote(normalized, providerMap['CRYPTOAPIS']);
       if (providerMap['FINNHUB']) return await this.fetchFinnhubQuote(normalized, providerMap['FINNHUB']);
       if (providerMap['TWELVEDATA']) return await this.fetchTwelveDataQuote(normalized, providerMap['TWELVEDATA']);
