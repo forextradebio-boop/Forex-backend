@@ -17,8 +17,9 @@ export class MarketService {
   
   private static ws: WebSocket | null = null;
   private static binanceWs: WebSocket | null = null;
-  // Limit to free plan test symbols to avoid bans
-  private static readonly WS_SYMBOLS = ['EUR/USD']; // Kept only EUR/USD for TwelveData. Crypto goes to Binance.
+  private static finnhubWs: WebSocket | null = null;
+  // Automatically populated with all non-crypto active symbols
+  private static WS_SYMBOLS: string[] = [];
 
   public static metrics = {
     providerRequests: 0,
@@ -37,19 +38,28 @@ export class MarketService {
 
     try {
       const yahooKey = await ApiKeyModel.findOne({ provider: 'YAHOO' });
-      if (yahooKey) this.isYahooActive = yahooKey.status === 'ACTIVE';
+      this.isYahooActive = yahooKey ? yahooKey.status === 'ACTIVE' : false;
     } catch(e) {
       console.error('[MarketService] Error fetching YAHOO state on start');
+      this.isYahooActive = false;
     }
 
-    // Initial load
     this.activeSymbols = await this.getWatchSymbols();
     this.metrics.activeSymbols = this.activeSymbols.length;
     
-    // Initial fetch for the test WS symbols ONLY to populate the cache (respecting 8 req/min limit)
-    await this.refreshQuotes(this.WS_SYMBOLS.map(s => s.replace('/', '')));
-
     const cryptoSymbols = ['BTCUSDT', 'ETHUSDT', 'LTCUSDT', 'BCHUSDT', 'XRPUSDT', 'DOGEUSDT'].map(s => s.replace('USDT', 'USD'));
+    // Populate TwelveData symbols (everything except crypto)
+    this.WS_SYMBOLS = this.activeSymbols
+      .filter(sym => !cryptoSymbols.includes(sym))
+      .map(sym => {
+        if (sym.length === 6 && !sym.includes('/')) return `${sym.substring(0,3)}/${sym.substring(3)}`;
+        if (sym === 'USOIL') return 'WTI';
+        if (sym === 'UKOIL') return 'BRENT';
+        return sym;
+      });
+
+    // Initial fetch for the WS symbols ONLY to populate the cache
+    await this.refreshQuotes(this.WS_SYMBOLS.map(s => s.replace('/', '')));
 
     // Start fast polling for non-WS symbols using Yahoo Finance
     setInterval(async () => {
@@ -74,11 +84,33 @@ export class MarketService {
     // Connect to Binance WebSocket for FREE real-time Crypto prices
     this.connectBinanceWebSocket();
 
+    // Connect to Finnhub WebSocket for real-time prices (if active)
+    this.connectFinnhubWebSocket();
+
     const symbolRefreshMs = Number(process.env.SYMBOL_REFRESH_MS) || 60000; // Slower refresh
     setInterval(async () => {
       try {
         this.activeSymbols = await this.getWatchSymbols();
         this.metrics.activeSymbols = this.activeSymbols.length;
+        
+        // Update WS_SYMBOLS list in background
+        const updatedWsSymbols = this.activeSymbols
+          .filter(sym => !cryptoSymbols.includes(sym))
+          .map(sym => {
+            if (sym.length === 6 && !sym.includes('/')) return `${sym.substring(0,3)}/${sym.substring(3)}`;
+            if (sym === 'USOIL') return 'WTI';
+            if (sym === 'UKOIL') return 'BRENT';
+            return sym;
+          });
+          
+        // Reconnect if the symbols list changed
+        if (updatedWsSymbols.sort().join(',') !== this.WS_SYMBOLS.sort().join(',')) {
+          this.WS_SYMBOLS = updatedWsSymbols;
+          console.log('[MarketService] Watchlist changed, reconnecting WebSocket...');
+          if (this.ws && (this.ws.readyState === 0 || this.ws.readyState === 1)) {
+            this.ws.close();
+          }
+        }
       } catch (err) {
         console.error('[MarketService] Symbol refresh error:', err);
       }
@@ -101,6 +133,13 @@ export class MarketService {
         this.binanceWs.close();
       } else {
         this.connectBinanceWebSocket();
+      }
+    } else if (provider === 'FINNHUB') {
+      console.log('[MarketService] Forcing Finnhub WebSocket reload...');
+      if (this.finnhubWs && (this.finnhubWs.readyState === 0 || this.finnhubWs.readyState === 1)) {
+        this.finnhubWs.close();
+      } else {
+        this.connectFinnhubWebSocket();
       }
     } else if (provider === 'YAHOO') {
       console.log('[MarketService] Reloading Yahoo status...');
@@ -130,9 +169,10 @@ export class MarketService {
     }
 
     const wsUrl = `wss://ws.twelvedata.com/v1/quotes/price?apikey=${apiKey}`;
-    this.ws = new WebSocket(wsUrl);
+    const ws = new WebSocket(wsUrl);
+    this.ws = ws;
 
-    this.ws.on('open', () => {
+    ws.on('open', () => {
       console.log(`[MarketService] TwelveData WebSocket connected`);
       const subscribeMsg = {
         action: 'subscribe',
@@ -140,10 +180,12 @@ export class MarketService {
           symbols: this.WS_SYMBOLS.join(',')
         }
       };
-      this.ws?.send(JSON.stringify(subscribeMsg));
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(subscribeMsg));
+      }
     });
 
-    this.ws.on('message', async (data: WebSocket.Data) => {
+    ws.on('message', async (data: WebSocket.Data) => {
       try {
         const message = JSON.parse(data.toString());
         if (message.event === 'price') {
@@ -159,7 +201,7 @@ export class MarketService {
              if (hasLimitError && this.currentTwelveDataKeyId) {
                console.warn('[MarketService] TwelveData API Limit reached! Marking key as EXHAUSTED and rotating...');
                await ApiKeyModel.findByIdAndUpdate(this.currentTwelveDataKeyId, { status: 'EXHAUSTED', errorCount: 1 });
-               this.ws?.close(); // Will trigger reconnect in 'close' event
+               ws.close(); // Will trigger reconnect in 'close' event
              }
           }
         } else if (message.event === 'error') {
@@ -169,7 +211,7 @@ export class MarketService {
                if (this.currentTwelveDataKeyId) {
                  await ApiKeyModel.findByIdAndUpdate(this.currentTwelveDataKeyId, { status: 'EXHAUSTED', errorCount: 1 });
                }
-               this.ws?.close();
+               ws.close();
            }
         }
       } catch (err) {
@@ -177,13 +219,21 @@ export class MarketService {
       }
     });
 
-    this.ws.on('close', () => {
-      console.log('[MarketService] TwelveData WebSocket closed. Reconnecting in 5s...');
-      setTimeout(() => this.connectWebSocket(), 5000);
+    ws.on('unexpected-response', (request, response) => {
+      console.error(`[MarketService] TwelveData WebSocket unexpected response: ${response.statusCode}`);
+      if (response.statusCode === 200) {
+        console.error('[MarketService] This usually means API rate limit or plan limit reached.');
+      }
     });
 
-    this.ws.on('error', (err) => {
-      console.error('[MarketService] TwelveData WebSocket error:', err);
+    ws.on('close', () => {
+      console.log(`[MarketService] TwelveData WebSocket closed. Reconnecting in 10s...`);
+      if (this.ws === ws) this.ws = null;
+      setTimeout(() => this.connectWebSocket(), 10000);
+    });
+
+    ws.on('error', (err) => {
+      console.error('[MarketService] TwelveData WebSocket error:', err.message);
     });
   }
 
@@ -207,6 +257,7 @@ export class MarketService {
         quote.price = newPrice;
         quote.bid = Number(newPrice.toFixed(6));
         quote.ask = Number((newPrice + spreadValue).toFixed(6));
+        quote.spread = spreadPips;
         if (newPrice > quote.high) quote.high = newPrice;
         if (newPrice < quote.low) quote.low = newPrice;
         quote.timestamp = Date.now();
@@ -239,11 +290,122 @@ export class MarketService {
     }
   }
 
+  private static async connectFinnhubWebSocket() {
+    let apiKey: string | null = null;
+    
+    try {
+      const keyRecord = await ApiKeyModel.findOne({ provider: 'FINNHUB', status: 'ACTIVE' });
+      if (keyRecord && keyRecord.keyValue) {
+        apiKey = keyRecord.keyValue;
+      }
+    } catch (e) {
+      console.error('[MarketService] Error fetching Finnhub Key from DB:', e);
+    }
+
+    if (!apiKey) {
+      return;
+    }
+
+    const wsUrl = `wss://ws.finnhub.io?token=${apiKey}`;
+    const ws = new WebSocket(wsUrl);
+    this.finnhubWs = ws;
+
+    ws.on('open', () => {
+      console.log(`[MarketService] Finnhub WebSocket connected`);
+      for (const symbol of this.WS_SYMBOLS) {
+        const fhSymbol = MarketProvider.getFinnhubSymbol(symbol);
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'subscribe', symbol: fhSymbol }));
+        }
+      }
+    });
+
+    ws.on('message', async (data: WebSocket.Data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        if (message.type === 'trade' && message.data && message.data.length > 0) {
+          const trade = message.data[0];
+          let internalSymbol = trade.s;
+          if (trade.s.startsWith('OANDA:')) {
+            internalSymbol = trade.s.replace('OANDA:', '').replace('_', '');
+          } else if (trade.s.startsWith('BINANCE:')) {
+            internalSymbol = trade.s.replace('BINANCE:', '').replace('USDT', 'USD');
+          }
+          await this.handleFinnhubTick(internalSymbol, trade);
+        }
+      } catch (err) {
+        // ignore
+      }
+    });
+
+    ws.on('close', () => {
+      console.log('[MarketService] Finnhub WebSocket closed. Reconnecting in 5s...');
+      if (this.finnhubWs === ws) this.finnhubWs = null;
+      setTimeout(() => this.connectFinnhubWebSocket(), 5000);
+    });
+
+    ws.on('error', (err) => {
+      console.error('[MarketService] Finnhub WebSocket error:', err);
+    });
+  }
+
+  private static async handleFinnhubTick(symbol: string, trade: any) {
+    const normalized = this.normalizeSymbol(symbol);
+    if (!normalized) return;
+
+    const existingCached = this.latestPriceCache.get(normalized);
+    const newPrice = Number(trade.p);
+    
+    if (existingCached) {
+      const quote = existingCached.value;
+      const changed = quote.price !== newPrice;
+
+      if (changed) {
+        const spreadPips = MarketProvider.getSpread(normalized);
+        const digits = MarketProvider.getDigits(normalized);
+        const pipSize = digits === 2 || digits === 3 ? 0.01 : 0.0001;
+        const spreadValue = spreadPips * pipSize;
+
+        quote.price = newPrice;
+        quote.bid = Number(newPrice.toFixed(6));
+        quote.ask = Number((newPrice + spreadValue).toFixed(6));
+        quote.spread = spreadPips;
+        if (newPrice > quote.high) quote.high = newPrice;
+        if (newPrice < quote.low) quote.low = newPrice;
+        quote.timestamp = Date.now();
+        existingCached.isStale = false;
+
+        this.dirtySymbols.add(normalized);
+        this.metrics.lastSuccessfulUpdate = Date.now();
+        
+        const { PriceEngine } = await import('./priceEngine');
+        PriceEngine.scheduleProcessing();
+      }
+    } else {
+      if (!this.quotePromises.has(normalized)) {
+        const fetchPromise = (async () => {
+          try {
+            const baseQuote = await MarketProvider.fetchQuote(normalized);
+            this.latestPriceCache.set(normalized, { value: baseQuote, timestamp: Date.now(), isStale: false });
+            this.dirtySymbols.add(normalized);
+            const { PriceEngine } = await import('./priceEngine');
+            PriceEngine.scheduleProcessing();
+          } catch (err: any) {
+            console.warn(`[MarketService] Failed to fetch base quote for ${normalized}: ${err.message}`);
+          } finally {
+            this.quotePromises.delete(normalized);
+          }
+        })();
+        this.quotePromises.set(normalized, fetchPromise);
+      }
+    }
+  }
+
   private static async connectBinanceWebSocket() {
     try {
       const keyRecord = await ApiKeyModel.findOne({ provider: 'BINANCE' });
-      if (keyRecord && keyRecord.status !== 'ACTIVE') {
-        console.warn('[MarketService] BINANCE provider is INACTIVE, skipping connection');
+      if (!keyRecord || keyRecord.status !== 'ACTIVE') {
+        console.warn('[MarketService] BINANCE provider is INACTIVE or missing, skipping connection');
         return;
       }
     } catch (e) {
@@ -255,13 +417,14 @@ export class MarketService {
     const streams = cryptoSymbols.map(s => s.toLowerCase() + '@ticker').join('/');
     const wsUrl = `wss://stream.binance.com:9443/stream?streams=${streams}`;
     
-    this.binanceWs = new WebSocket(wsUrl);
+    const ws = new WebSocket(wsUrl);
+    this.binanceWs = ws;
 
-    this.binanceWs.on('open', () => {
+    ws.on('open', () => {
       console.log('[MarketService] Binance WebSocket connected (FREE CRYPTO)');
     });
 
-    this.binanceWs.on('message', async (data: WebSocket.Data) => {
+    ws.on('message', async (data: WebSocket.Data) => {
       try {
         const message = JSON.parse(data.toString());
         if (message.data && message.data.c) {
@@ -276,12 +439,13 @@ export class MarketService {
       }
     });
 
-    this.binanceWs.on('close', () => {
+    ws.on('close', () => {
       console.log('[MarketService] Binance WebSocket closed. Reconnecting in 5s...');
+      if (this.binanceWs === ws) this.binanceWs = null;
       setTimeout(() => this.connectBinanceWebSocket(), 5000);
     });
     
-    this.binanceWs.on('error', (err) => {
+    ws.on('error', (err) => {
       console.error('[MarketService] Binance WebSocket error:', err);
     });
   }
@@ -301,6 +465,7 @@ export class MarketService {
         quote.price = newPrice;
         quote.bid = Number(tick.b) || newPrice;
         quote.ask = Number(tick.a) || newPrice;
+        quote.spread = Number((quote.ask - quote.bid).toFixed(6)) * 10000; // rough estimation for crypto or keep it 0 if it's dynamic
         quote.high = Number(tick.h) || quote.high;
         quote.low = Number(tick.l) || quote.low;
         quote.open = Number(tick.o) || quote.open;
@@ -441,6 +606,17 @@ export class MarketService {
             } else {
               this.dirtySymbols.add(normalized);
               changed = true;
+            }
+
+            if (changed) {
+              const spreadPips = MarketProvider.getSpread(normalized);
+              const digits = MarketProvider.getDigits(normalized);
+              const pipSize = digits === 2 || digits === 3 ? 0.01 : 0.0001;
+              const spreadValue = spreadPips * pipSize;
+
+              quote.bid = Number(quote.price.toFixed(6));
+              quote.ask = Number((quote.price + spreadValue).toFixed(6));
+              quote.spread = spreadPips;
             }
             
             this.latestPriceCache.set(normalized, { value: quote, timestamp: Date.now(), isStale: false });

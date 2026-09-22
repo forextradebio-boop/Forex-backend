@@ -11,6 +11,7 @@ export interface ITransaction extends Document {
   isDeleted: boolean;
   deletedAt?: Date;
   isArchived: boolean;
+  displayCurrency?: 'INR' | 'USDT' | 'BOTH';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -27,6 +28,7 @@ const TransactionSchema = new Schema<ITransaction>(
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date },
     isArchived: { type: Boolean, default: false },
+    displayCurrency: { type: String, enum: ['INR', 'USDT', 'BOTH'], default: 'BOTH' },
   },
   { timestamps: true }
 );

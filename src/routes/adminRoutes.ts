@@ -11,6 +11,7 @@ import {
   getKycRequests,
   getKycRequestById,
   getWithdrawals,
+  deleteWithdrawal,
   getSymbols,
   createSymbol,
   updateSymbolStatus,
@@ -78,6 +79,7 @@ router.post('/kyc/:id/reject', rejectKyc);
 // Withdrawal Actions
 router.post('/withdrawals/:id/approve', approveWithdrawal);
 router.post('/withdrawals/:id/reject', rejectWithdrawal);
+router.delete('/withdraw/:id', deleteWithdrawal);
 
 // Market and symbol management
 router.post('/symbols', createSymbol);

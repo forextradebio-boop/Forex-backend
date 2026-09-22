@@ -1,7 +1,7 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
 export interface IApiKey extends Document {
-  provider: 'TWELVEDATA' | 'FINNHUB' | 'BINANCE' | 'YAHOO';
+  provider: string;
   keyName: string;
   keyValue: string;
   status: 'ACTIVE' | 'INACTIVE' | 'EXHAUSTED';
@@ -15,7 +15,7 @@ const ApiKeySchema = new Schema<IApiKey>(
     provider: {
       type: String,
       required: true,
-      enum: ['TWELVEDATA', 'FINNHUB', 'BINANCE', 'YAHOO'],
+      uppercase: true, // Auto-capitalize custom providers
       default: 'TWELVEDATA'
     },
     keyName: {
