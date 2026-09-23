@@ -438,12 +438,15 @@ export class MarketProvider {
   private static mapTimeframeToInfoway(timeframe: string): number {
     switch (timeframe.toLowerCase()) {
       case 'm1': case '1m': return 1;
-      case 'm5': case '5m': return 5;
-      case 'm15': case '15m': return 15;
-      case 'm30': case '30m': return 30;
-      case 'h1': case '1h': return 60;
-      case 'd1': case '1d': return 6; // Or specific daily code, fallback to 6
-      default: return 60;
+      case 'm5': case '5m': return 2;
+      case 'm15': case '15m': return 3;
+      case 'm30': case '30m': return 4;
+      case 'h1': case '1h': return 5;
+      case 'h4': case '4h': return 5; // fallback to 1h if 4h is not supported natively or needs another id
+      case 'd1': case '1d': return 6;
+      case 'w1': case '1wk': case '1w': return 7;
+      case 'mo1': case '1mo': return 8;
+      default: return 6; // default to daily
     }
   }
 
