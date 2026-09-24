@@ -629,6 +629,83 @@ var init_marketProvider = __esm({
           timestamp: Number(data.closeTime) || Date.now()
         };
       }
+      static getCryptoApisSymbol(symbol) {
+        const normalized = this.normalizeSymbol(symbol);
+        if (SymbolMapper.getCategory(normalized) === "CRYPTO") {
+          return normalized.replace("USD", "");
+        }
+        return normalized;
+      }
+      static async fetchCryptoApisQuote(symbol, apiKey) {
+        const normalized = this.normalizeSymbol(symbol);
+        const apiSymbol = this.getCryptoApisSymbol(normalized);
+        const url = `https://api.freecryptoapi.com/v1/getData?symbol=${apiSymbol}&token=${apiKey}`;
+        const response = await axios.get(url, { timeout: 8e3 });
+        const data = response.data;
+        if (data.status === false || !data.symbols || data.symbols.length === 0) {
+          throw new Error(`Invalid CryptoApis quote response for ${apiSymbol}`);
+        }
+        const item = data.symbols[0];
+        const price = Number(item.last);
+        const changePercent = Number(item.daily_change_percentage);
+        const open = price / (1 + changePercent / 100);
+        return {
+          symbol: normalized,
+          price,
+          bid: price,
+          ask: price,
+          spread: 0,
+          high: Number(item.highest),
+          low: Number(item.lowest),
+          open,
+          previousClose: open,
+          change: price - open,
+          changePercent,
+          category: SymbolMapper.getCategory(normalized),
+          marketStatus: "OPEN",
+          volume: 0,
+          // Not provided directly in the same field
+          timestamp: new Date(item.date).getTime() || Date.now()
+        };
+      }
+      static async fetchInfowayQuote(symbol, apiKey) {
+        const normalized = this.normalizeSymbol(symbol);
+        const url = `https://data.infoway.io/common/v2/batch_kline`;
+        const response = await axios.post(url, {
+          codes: normalized,
+          klineType: 1,
+          klineNum: 1
+        }, {
+          headers: { "apiKey": apiKey },
+          timeout: 8e3
+        });
+        const data = response.data;
+        if (data.ret !== 200 || !data.data || data.data.length === 0 || !data.data[0].respList || data.data[0].respList.length === 0) {
+          throw new Error(`Invalid Infoway quote response for ${normalized}`);
+        }
+        const item = data.data[0].respList[0];
+        const price = Number(item.c);
+        const open = Number(item.o);
+        const high = Number(item.h);
+        const low = Number(item.l);
+        return {
+          symbol: normalized,
+          price,
+          bid: price,
+          ask: price,
+          spread: 0,
+          high,
+          low,
+          open,
+          previousClose: open,
+          change: Number(item.pca) || price - open,
+          changePercent: parseFloat(item.pc) || 0,
+          category: SymbolMapper.getCategory(normalized),
+          marketStatus: "OPEN",
+          volume: Number(item.v) || 0,
+          timestamp: Number(item.t) * 1e3 || Date.now()
+        };
+      }
       static async fetchQuote(symbol) {
         const activeKeys = await ApiKeyModel.find({ status: "ACTIVE" });
         const providerMap = activeKeys.reduce((acc, key) => {
@@ -637,6 +714,8 @@ var init_marketProvider = __esm({
         }, {});
         const normalized = this.normalizeSymbol(symbol);
         try {
+          if (providerMap["INFOWAY"]) return await this.fetchInfowayQuote(normalized, providerMap["INFOWAY"]);
+          if (providerMap["CRYPTOAPIS"] && SymbolMapper.getCategory(normalized) === "CRYPTO") return await this.fetchCryptoApisQuote(normalized, providerMap["CRYPTOAPIS"]);
           if (providerMap["FINNHUB"]) return await this.fetchFinnhubQuote(normalized, providerMap["FINNHUB"]);
           if (providerMap["TWELVEDATA"]) return await this.fetchTwelveDataQuote(normalized, providerMap["TWELVEDATA"]);
           if (providerMap["BINANCE"] && SymbolMapper.getCategory(normalized) === "CRYPTO") return await this.fetchBinanceQuote(normalized, providerMap["BINANCE"]);
@@ -693,6 +772,7 @@ var init_marketProvider = __esm({
         }, {});
         const normalized = this.normalizeSymbol(symbol);
         try {
+          if (providerMap["INFOWAY"]) return await this.fetchInfowayCandles(normalized, timeframe, providerMap["INFOWAY"]);
           if (providerMap["FINNHUB"]) return await this.fetchFinnhubCandles(normalized, timeframe, providerMap["FINNHUB"]);
           if (providerMap["TWELVEDATA"]) return await this.fetchTwelveDataCandles(normalized, timeframe, providerMap["TWELVEDATA"]);
         } catch (e) {
@@ -727,6 +807,63 @@ var init_marketProvider = __esm({
           default:
             return "D";
         }
+      }
+      static mapTimeframeToInfoway(timeframe) {
+        switch (timeframe.toLowerCase()) {
+          case "m1":
+          case "1m":
+            return 1;
+          case "m5":
+          case "5m":
+            return 5;
+          case "m15":
+          case "15m":
+            return 15;
+          case "m30":
+          case "30m":
+            return 30;
+          case "h1":
+          case "1h":
+            return 60;
+          case "d1":
+          case "1d":
+            return 6;
+          // Or specific daily code, fallback to 6
+          default:
+            return 60;
+        }
+      }
+      static async fetchInfowayCandles(symbol, timeframe, apiKey) {
+        const normalized = this.normalizeSymbol(symbol);
+        const klineType = this.mapTimeframeToInfoway(timeframe);
+        const klineNum = 500;
+        const url = `https://data.infoway.io/common/v2/batch_kline`;
+        const response = await axios.post(url, {
+          codes: normalized,
+          klineType,
+          klineNum
+        }, {
+          headers: { "apiKey": apiKey },
+          timeout: 1e4
+        });
+        const data = response.data;
+        if (data.ret !== 200 || !data.data || data.data.length === 0 || !data.data[0].respList) {
+          return [];
+        }
+        const respList = data.data[0].respList;
+        const candles = [];
+        for (let i = 0; i < respList.length; i++) {
+          const item = respList[i];
+          candles.push({
+            time: Number(item.t),
+            open: Number(item.o),
+            high: Number(item.h),
+            low: Number(item.l),
+            close: Number(item.c),
+            volume: Number(item.v) || 0
+          });
+        }
+        return candles.sort((a, b) => a.time - b.time);
       }
       static async fetchFinnhubCandles(symbol, timeframe, apiKey) {
         const normalized = this.normalizeSymbol(symbol);
@@ -1824,13 +1961,21 @@ var init_market_service = __esm({
           try {
             if (this.activeSymbols.length === 0) return;
             const nonWsSymbols = this.activeSymbols.filter(
-              (sym) => !this.WS_SYMBOLS.includes(sym) && !this.WS_SYMBOLS.includes(sym.replace("/", "")) && !cryptoSymbols.includes(sym)
+              (sym) => {
+                const isCrypto = cryptoSymbols.includes(sym);
+                if (isCrypto && this.binanceWs && this.binanceWs.readyState === 1) return false;
+                const isWsActive = this.ws && this.ws.readyState === 1 || this.finnhubWs && this.finnhubWs.readyState === 1;
+                if (!isCrypto && isWsActive) {
+                  if (this.WS_SYMBOLS.includes(sym) || this.WS_SYMBOLS.includes(sym.replace("/", ""))) return false;
+                }
+                return true;
+              }
             );
             if (nonWsSymbols.length > 0) {
-              await this.pollYahooQuotes(nonWsSymbols);
+              await this.pollRestQuotes(nonWsSymbols);
             }
           } catch (err) {
-            console.error("[MarketService] Yahoo polling error:", err);
+            console.error("[MarketService] REST polling error:", err);
           }
         }, 2500);
         this.connectWebSocket();
@@ -2243,8 +2388,7 @@ var init_market_service = __esm({
         }
       }
       static isYahooActive = true;
-      static async pollYahooQuotes(symbolsToFetch) {
-        if (!this.isYahooActive) return;
+      static async pollRestQuotes(symbolsToFetch) {
         try {
           await Promise.all(
             symbolsToFetch.map(async (symbol) => {
@@ -2252,7 +2396,7 @@ var init_market_service = __esm({
               if (!normalized) return;
               try {
                 this.metrics.providerRequests++;
-                const quote = await MarketProvider.fetchYahooQuote(normalized);
+                const quote = await MarketProvider.fetchQuote(normalized);
                 let changed = false;
                 const existingCached = this.latestPriceCache.get(normalized);
                 if (existingCached) {
@@ -2282,12 +2426,12 @@ var init_market_service = __esm({
                 }
               } catch (error) {
                 this.metrics.providerErrors++;
-                console.warn(`[MarketService] Yahoo fetch failed for ${normalized}: ${error.message}`);
+                console.warn(`[MarketService] REST fetch failed for ${normalized}: ${error.message}`);
               }
             })
           );
         } catch (err) {
-          console.error("[MarketService] pollYahooQuotes error:", err);
+          console.error("[MarketService] pollRestQuotes error:", err);
         }
       }
       static normalizeSymbol(symbol) {
