@@ -19,10 +19,11 @@ export const connectDatabase = async () => {
       console.log('MongoDB Connected Successfully (in-memory)');
     } else {
       await mongoose.connect(config.mongoUri, {
+        dbName: 'forextradebio',
         serverSelectionTimeoutMS: 5000,
         socketTimeoutMS: 45000,
       });
-      console.log('MongoDB Connected Successfully');
+      console.log('MongoDB Connected Successfully to forextradebio database');
     }
   } catch (err) {
     console.error('MongoDB connection error:', err);

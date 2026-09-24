@@ -31,7 +31,7 @@ export const getDepositById = async (req: Request, res: Response) => {
 export const approveDeposit = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { remarks, customExchangeRate } = req.body;
+    const { remarks, customExchangeRate, displayCurrency } = req.body;
     const adminId = (req as any).user.id;
     
     const deposit = await DepositModel.findById(id);
@@ -80,7 +80,8 @@ export const approveDeposit = async (req: Request, res: Response) => {
         balanceAfter: wallet.balance,
         status: 'APPROVED',
         referenceId: (deposit as any)._id.toString(),
-        description: `Deposit Approved by Admin${remarks ? ' - ' + remarks : ''}`
+        description: `Deposit Approved by Admin${remarks ? ' - ' + remarks : ''}`,
+        displayCurrency: displayCurrency || 'BOTH'
       });
     }
 
