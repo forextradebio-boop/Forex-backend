@@ -417,8 +417,72 @@ export class MarketProvider {
     } catch (e: any) {
       console.warn(`[MarketProvider] Candles fetch failed: ${e.message}`);
     }
+
+    try {
+      return await this.fetchYahooCandles(normalized, timeframe);
+    } catch (e: any) {
+      console.warn(`[MarketProvider] Yahoo fallback candles fetch failed: ${e.message}`);
+    }
     
     return [];
+  }
+
+  private static mapTimeframeToYahoo(timeframe: string): '1m' | '2m' | '5m' | '15m' | '30m' | '60m' | '90m' | '1h' | '1d' | '5d' | '1wk' | '1mo' | '3mo' {
+    switch (timeframe.toLowerCase()) {
+      case 'm1': case '1m': return '1m';
+      case 'm5': case '5m': return '5m';
+      case 'm15': case '15m': return '15m';
+      case 'm30': case '30m': return '30m';
+      case 'h1': case '1h': return '1h'; // or '60m'
+      case 'd1': case '1d': return '1d';
+      case '1wk': case 'w1': return '1wk';
+      case '1mo': case 'mo1': return '1mo';
+      default: return '1d';
+    }
+  }
+
+  public static async fetchYahooCandles(symbol: string, timeframe: string): Promise<CandlePoint[]> {
+    const normalized = this.normalizeSymbol(symbol);
+    const yfSymbol = this.getYahooSymbol(normalized);
+    
+    if (!this.yahooFinanceInstance) {
+      const yahooFinanceLib = (await import('yahoo-finance2')).default;
+      this.yahooFinanceInstance = new (yahooFinanceLib as any)({ suppressNotices: ['yahooSurvey'] });
+    }
+    
+    const interval = this.mapTimeframeToYahoo(timeframe);
+    
+    const now = new Date();
+    const past = new Date();
+    if (interval === '1m') {
+      past.setDate(now.getDate() - 5);
+    } else if (interval.endsWith('m') || interval === '1h') {
+      past.setDate(now.getDate() - 30);
+    } else {
+      past.setFullYear(now.getFullYear() - 1);
+    }
+
+    try {
+      const results = await this.yahooFinanceInstance.chart(yfSymbol, {
+        period1: past,
+        interval: interval
+      });
+      
+      if (!results || !results.quotes) return [];
+
+      return results.quotes
+        .filter((v: any) => v.close !== null && v.close !== undefined)
+        .map((v: any) => ({
+          time: Math.floor(new Date(v.date).getTime() / 1000),
+          open: v.open ?? v.close,
+          high: v.high ?? v.close,
+          low: v.low ?? v.close,
+          close: v.close,
+          volume: v.volume || 0
+        }));
+    } catch (e: any) {
+      throw new Error(`Yahoo Finance chart error for ${symbol}: ${e.message}`);
+    }
   }
 
   private static mapTimeframeToFinnhub(timeframe: string): string {
