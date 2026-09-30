@@ -413,7 +413,7 @@ export class MarketService {
 
   private static async connectBinanceWebSocket() {
     try {
-      const keyRecord = await ApiKeyModel.findOne({ provider: 'BINANCE' });
+      const keyRecord = await ApiKeyModel.findOne({ provider: { $in: ['BINANCE', 'CRYPTO', 'CRYPTOAPIS'] } });
       if (!keyRecord || keyRecord.status !== 'ACTIVE') {
         console.warn('[MarketService] BINANCE provider is INACTIVE or missing, skipping connection');
         return;

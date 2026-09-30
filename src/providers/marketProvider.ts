@@ -342,7 +342,7 @@ export class MarketProvider {
 
     try {
       if (providerMap['INFOWAY']) return await this.fetchInfowayQuote(normalized, providerMap['INFOWAY']);
-      if (providerMap['CRYPTOAPIS'] && SymbolMapper.getCategory(normalized) === 'CRYPTO') return await this.fetchCryptoApisQuote(normalized, providerMap['CRYPTOAPIS']);
+      if ((providerMap['CRYPTOAPIS'] || providerMap['CRYPTO']) && SymbolMapper.getCategory(normalized) === 'CRYPTO') return await this.fetchCryptoApisQuote(normalized, providerMap['CRYPTOAPIS'] || providerMap['CRYPTO']);
       if (providerMap['FINNHUB']) return await this.fetchFinnhubQuote(normalized, providerMap['FINNHUB']);
       if (providerMap['TWELVEDATA']) return await this.fetchTwelveDataQuote(normalized, providerMap['TWELVEDATA']);
       if (providerMap['BINANCE'] && SymbolMapper.getCategory(normalized) === 'CRYPTO') return await this.fetchBinanceQuote(normalized, providerMap['BINANCE']);
