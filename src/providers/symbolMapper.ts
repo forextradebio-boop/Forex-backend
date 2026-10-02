@@ -29,9 +29,20 @@ const SUPPORTED_SYMBOLS: Record<string, SymbolDefinition> = {
 
 export class SymbolMapper {
   static normalizeSymbol(symbol: string): string {
-    return (symbol || '')
+    let s = (symbol || '')
       .replace(/[/\-\s]+/g, '')
       .toUpperCase();
+    
+    // Support micro/mini lot suffixes like 'm' (e.g., XAUUSDm -> XAUUSD)
+    if (s.endsWith('M') && s.length > 1) {
+      const base = s.slice(0, -1);
+      // If the base symbol is supported, use it instead
+      if (SUPPORTED_SYMBOLS[base]) {
+        s = base;
+      }
+    }
+    
+    return s;
   }
 
   static getProviderSymbol(symbol: string): string {
