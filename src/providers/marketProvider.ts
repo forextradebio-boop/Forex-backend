@@ -642,6 +642,10 @@ export class MarketProvider {
       const from = normalized.replace('USD', '');
       url = `https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=${from}&to_currency=USD&apikey=${apiKey}`;
       isExchange = true;
+    } else if (category === 'METALS') {
+      // AlphaVantage GLOBAL_QUOTE for XAUUSD returns a random mutual fund priced at 4200+
+      // throwing off the charts. We must block metals and let it fall back to Finnhub/Yahoo.
+      throw new Error(`AlphaVantage does not support spot metals like ${normalized}`);
     } else {
       url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${normalized}&apikey=${apiKey}`;
     }
@@ -725,7 +729,7 @@ export class MarketProvider {
     const data = response.data;
 
     if (!data.success) {
-      throw new Error(`MetalPriceAPI Error: ${data.error?.info || data.error?.type || 'Unknown error'}`);
+      throw new Error(`MetalPriceAPI Error: ${data.error?.message || data.error?.info || data.error?.type || 'Unknown error'}`);
     }
 
     let rate = data.rates[currency];
