@@ -346,6 +346,13 @@ export class MarketProvider {
       if (providerMap['FINNHUB']) return await this.fetchFinnhubQuote(normalized, providerMap['FINNHUB']);
       if (providerMap['TWELVEDATA']) return await this.fetchTwelveDataQuote(normalized, providerMap['TWELVEDATA']);
       if (providerMap['BINANCE'] && SymbolMapper.getCategory(normalized) === 'CRYPTO') return await this.fetchBinanceQuote(normalized, providerMap['BINANCE']);
+      
+      const metalKey = providerMap['US OIL'] || providerMap['USOIL'] || providerMap['METALPRICE'];
+      if (metalKey) return await this.fetchMetalPriceQuote(normalized, metalKey);
+
+      if (providerMap['VANTAG']) return await this.fetchVantageQuote(normalized, providerMap['VANTAG']);
+      if (providerMap['VANTAGE']) return await this.fetchVantageQuote(normalized, providerMap['VANTAGE']);
+      if (providerMap['ALPHAVANTAGE']) return await this.fetchVantageQuote(normalized, providerMap['ALPHAVANTAGE']);
       if (providerMap['YAHOO']) return await this.fetchYahooQuote(normalized);
     } catch (e: any) {
       console.warn(`[MarketProvider] Primary fetch failed: ${e.message}, falling back...`);
@@ -413,6 +420,9 @@ export class MarketProvider {
       if (providerMap['INFOWAY']) return await this.fetchInfowayCandles(normalized, timeframe, providerMap['INFOWAY']);
       if (providerMap['FINNHUB']) return await this.fetchFinnhubCandles(normalized, timeframe, providerMap['FINNHUB']);
       if (providerMap['TWELVEDATA']) return await this.fetchTwelveDataCandles(normalized, timeframe, providerMap['TWELVEDATA']);
+      if (providerMap['VANTAG']) return await this.fetchVantageCandles(normalized, timeframe, providerMap['VANTAG']);
+      if (providerMap['VANTAGE']) return await this.fetchVantageCandles(normalized, timeframe, providerMap['VANTAGE']);
+      if (providerMap['ALPHAVANTAGE']) return await this.fetchVantageCandles(normalized, timeframe, providerMap['ALPHAVANTAGE']);
       // Binance could be added here for crypto
     } catch (e: any) {
       console.warn(`[MarketProvider] Candles fetch failed: ${e.message}`);
@@ -615,6 +625,135 @@ export class MarketProvider {
     .sort((a: CandlePoint, b: CandlePoint) => a.time - b.time);
 
     return candles;
+  }
+
+  public static async fetchVantageQuote(symbol: string, apiKey: string): Promise<QuotePayload> {
+    const normalized = this.normalizeSymbol(symbol);
+    const category = SymbolMapper.getCategory(normalized);
+    let url = '';
+    let isExchange = false;
+
+    if (category === 'FOREX') {
+      const from = normalized.substring(0, 3);
+      const to = normalized.substring(3);
+      url = `https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=${from}&to_currency=${to}&apikey=${apiKey}`;
+      isExchange = true;
+    } else if (category === 'CRYPTO') {
+      const from = normalized.replace('USD', '');
+      url = `https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=${from}&to_currency=USD&apikey=${apiKey}`;
+      isExchange = true;
+    } else {
+      url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${normalized}&apikey=${apiKey}`;
+    }
+
+    const response = await axios.get(url, { timeout: 8000 });
+    const data = response.data;
+
+    if (data['Error Message'] || data['Note'] || data['Information']) {
+      throw new Error(`AlphaVantage API Error: ${data['Error Message'] || data['Note'] || data['Information']}`);
+    }
+
+    if (isExchange) {
+      const rate = data['Realtime Currency Exchange Rate'];
+      if (!rate) throw new Error(`Invalid AlphaVantage response for ${normalized}`);
+      
+      const price = Number(rate['5. Exchange Rate']);
+      return {
+        symbol: normalized,
+        price: price,
+        bid: Number(rate['8. Bid Price']) || price,
+        ask: Number(rate['9. Ask Price']) || price,
+        spread: 0,
+        high: price,
+        low: price,
+        open: price,
+        previousClose: price,
+        change: 0,
+        changePercent: 0,
+        category: category,
+        marketStatus: 'OPEN',
+        volume: 0,
+        timestamp: Date.now()
+      };
+    } else {
+      const quote = data['Global Quote'];
+      if (!quote || !quote['05. price']) throw new Error(`Invalid AlphaVantage response for ${normalized}`);
+      
+      const price = Number(quote['05. price']);
+      return {
+        symbol: normalized,
+        price: price,
+        bid: price,
+        ask: price,
+        spread: 0,
+        high: Number(quote['03. high']),
+        low: Number(quote['04. low']),
+        open: Number(quote['02. open']),
+        previousClose: Number(quote['08. previous close']),
+        change: Number(quote['09. change']),
+        changePercent: parseFloat(quote['10. change percent']) || 0,
+        category: category,
+        marketStatus: 'OPEN',
+        volume: Number(quote['06. volume']) || 0,
+        timestamp: Date.now()
+      };
+    }
+  }
+
+  public static async fetchVantageCandles(symbol: string, timeframe: string, apiKey: string): Promise<CandlePoint[]> {
+    // Due to AlphaVantage's strict 25 requests/day free limit and complex Intraday endpoints for different categories,
+    // we fallback to Yahoo for candles to save AlphaVantage limits purely for real-time quoting if possible.
+    // However, if we MUST implement it, it goes here.
+    return this.fetchYahooCandles(symbol, timeframe);
+  }
+
+  public static async fetchMetalPriceQuote(symbol: string, apiKey: string): Promise<QuotePayload> {
+    const normalized = this.normalizeSymbol(symbol);
+    let base = 'USD';
+    let currency = normalized;
+    
+    if (normalized.endsWith('USD')) {
+       currency = normalized.replace('USD', '');
+    } else if (normalized === 'USOIL') {
+       currency = 'WTI';
+    } else if (normalized === 'UKOIL') {
+       currency = 'BRENT';
+    }
+
+    const url = `https://api.metalpriceapi.com/v1/latest?api_key=${apiKey}&base=${base}&currencies=${currency},USOIL`;
+    const response = await axios.get(url, { timeout: 8000 });
+    const data = response.data;
+
+    if (!data.success) {
+      throw new Error(`MetalPriceAPI Error: ${data.error?.info || data.error?.type || 'Unknown error'}`);
+    }
+
+    let rate = data.rates[currency];
+    if (!rate && currency === 'WTI') rate = data.rates['USOIL'];
+    if (!rate && currency === 'BRENT') rate = data.rates['BRENT'];
+    if (!rate) throw new Error(`Invalid MetalPriceAPI response for ${normalized}`);
+
+    // MetalPriceAPI returns rate as 1 Base = X Currency (e.g. 1 USD = 0.0005 XAU)
+    // To get price of 1 Currency in USD, we do 1 / rate
+    const price = 1 / Number(rate);
+
+    return {
+      symbol: normalized,
+      price: price,
+      bid: price,
+      ask: price,
+      spread: 0,
+      high: price,
+      low: price,
+      open: price,
+      previousClose: price,
+      change: 0,
+      changePercent: 0,
+      category: SymbolMapper.getCategory(normalized),
+      marketStatus: 'OPEN',
+      volume: 0,
+      timestamp: data.timestamp ? data.timestamp * 1000 : Date.now()
+    };
   }
 
   public static async fetchMovers(params: { exchange?: string; name?: string; locale?: string }) {
