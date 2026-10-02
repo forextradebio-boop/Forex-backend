@@ -340,33 +340,43 @@ export class MarketProvider {
 
     const normalized = this.normalizeSymbol(symbol);
 
-    try {
-      if (providerMap['INFOWAY']) return await this.fetchInfowayQuote(normalized, providerMap['INFOWAY']);
-      if ((providerMap['CRYPTOAPIS'] || providerMap['CRYPTO']) && SymbolMapper.getCategory(normalized) === 'CRYPTO') return await this.fetchCryptoApisQuote(normalized, providerMap['CRYPTOAPIS'] || providerMap['CRYPTO']);
-      if (providerMap['FINNHUB']) return await this.fetchFinnhubQuote(normalized, providerMap['FINNHUB']);
-      if (providerMap['TWELVEDATA']) return await this.fetchTwelveDataQuote(normalized, providerMap['TWELVEDATA']);
-      if (providerMap['BINANCE'] && SymbolMapper.getCategory(normalized) === 'CRYPTO') return await this.fetchBinanceQuote(normalized, providerMap['BINANCE']);
-      
-      const metalKey = providerMap['US OIL'] || providerMap['USOIL'] || providerMap['METALPRICE'];
-      if (metalKey) return await this.fetchMetalPriceQuote(normalized, metalKey);
-
-      if (providerMap['VANTAG']) return await this.fetchVantageQuote(normalized, providerMap['VANTAG']);
-      if (providerMap['VANTAGE']) return await this.fetchVantageQuote(normalized, providerMap['VANTAGE']);
-      if (providerMap['ALPHAVANTAGE']) return await this.fetchVantageQuote(normalized, providerMap['ALPHAVANTAGE']);
-      if (providerMap['YAHOO']) return await this.fetchYahooQuote(normalized);
-    } catch (e: any) {
-      console.warn(`[MarketProvider] Primary fetch failed: ${e.message}, falling back...`);
-    }
-    
-    if (providerMap['YAHOO']) {
+    const tryFetch = async (fn: () => Promise<QuotePayload>) => {
       try {
-        return await this.fetchYahooQuote(normalized);
+        return await fn();
       } catch (e: any) {
-        throw new Error(`[MarketProvider] All fetch attempts failed including YAHOO fallback.`);
+        console.warn(`[MarketProvider] Fetch failed: ${e.message}, falling back to next...`);
+        return null;
       }
-    }
+    };
+
+    let quote: QuotePayload | null = null;
+
+    if (!quote && providerMap['INFOWAY']) quote = await tryFetch(() => this.fetchInfowayQuote(normalized, providerMap['INFOWAY']));
+    if (!quote && (providerMap['CRYPTOAPIS'] || providerMap['CRYPTO']) && SymbolMapper.getCategory(normalized) === 'CRYPTO') quote = await tryFetch(() => this.fetchCryptoApisQuote(normalized, providerMap['CRYPTOAPIS'] || providerMap['CRYPTO']));
+    if (!quote && providerMap['FINNHUB']) quote = await tryFetch(() => this.fetchFinnhubQuote(normalized, providerMap['FINNHUB']));
+    if (!quote && providerMap['TWELVEDATA']) quote = await tryFetch(() => this.fetchTwelveDataQuote(normalized, providerMap['TWELVEDATA']));
+    if (!quote && providerMap['BINANCE'] && SymbolMapper.getCategory(normalized) === 'CRYPTO') quote = await tryFetch(() => this.fetchBinanceQuote(normalized, providerMap['BINANCE']));
+
+    const metalKey = providerMap['US OIL'] || providerMap['USOIL'] || providerMap['METALPRICE'];
+    if (!quote && metalKey) quote = await tryFetch(() => this.fetchMetalPriceQuote(normalized, metalKey));
+
+    if (!quote && providerMap['VANTAG']) quote = await tryFetch(() => this.fetchVantageQuote(normalized, providerMap['VANTAG']));
+    if (!quote && providerMap['VANTAGE']) quote = await tryFetch(() => this.fetchVantageQuote(normalized, providerMap['VANTAGE']));
+    if (!quote && providerMap['ALPHAVANTAGE']) quote = await tryFetch(() => this.fetchVantageQuote(normalized, providerMap['ALPHAVANTAGE']));
+
+    if (!quote && providerMap['YAHOO']) quote = await tryFetch(() => this.fetchYahooQuote(normalized));
+
+    if (quote) return quote;
     
-    throw new Error('No active API keys found for fetching quotes.');
+    // If we've reached here, either NO active keys were found, OR all of them failed!
+    // Try YAHOO as a last-resort universal fallback even if it's not strictly 'ACTIVE' in DB,
+    // to prevent complete system crash
+    try {
+       console.warn(`[MarketProvider] All active providers failed for ${normalized}. Trying YAHOO as absolute fallback.`);
+       return await this.fetchYahooQuote(normalized);
+    } catch (e: any) {
+       throw new Error('All providers failed and YAHOO fallback failed.');
+    }
   }
 
   public static async fetchTwelveDataQuote(symbol: string, apiKey: string): Promise<QuotePayload> {
