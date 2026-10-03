@@ -367,6 +367,7 @@ export const clearUserHistory = async (req: Request, res: Response) => {
     const { TradeHistoryModel } = await import('../models/TradeHistory');
     // Soft delete
     await TradeHistoryModel.updateMany({ userId: id }, { isDeleted: true });
+    await PositionModel.updateMany({ userId: id, status: 'CLOSED' }, { deletedAt: new Date(), isArchived: true });
     await logAdminAction((req as any).user.id, 'CLEAR_USER_HISTORY_SOFT', { userId: id });
     res.json({ success: true });
   } catch (error: any) {
@@ -747,8 +748,8 @@ export const getAllTrades = async (req: Request, res: Response) => {
 
     // Fetch all open positions, closed positions, and pending orders
     const [openPositions, closedPositions, pendingOrders] = await Promise.all([
-      PositionModel.find({ status: 'OPEN' }).populate('userId', 'fullName email username'),
-      PositionModel.find({ status: 'CLOSED' }).populate('userId', 'fullName email username'),
+      PositionModel.find({ status: 'OPEN', deletedAt: { $exists: false } }).populate('userId', 'fullName email username'),
+      PositionModel.find({ status: 'CLOSED', deletedAt: { $exists: false } }).populate('userId', 'fullName email username'),
       OrderModel.find({ status: 'PENDING' }).populate('userId', 'fullName email username')
     ]);
 
