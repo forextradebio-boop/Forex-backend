@@ -979,6 +979,11 @@ export const addApiKey = async (req: Request, res: Response) => {
     });
 
     await logAdminAction((req as any).user.id, 'API_KEY_ADDED', { provider, keyName });
+    
+    // Force a reconnection or reload to apply changes immediately
+    const { MarketService } = await import('../services/market.service');
+    await MarketService.reloadProvider(newKey.provider);
+
     res.status(201).json(newKey);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -1020,6 +1025,11 @@ export const deleteApiKey = async (req: Request, res: Response) => {
     if (!key) return res.status(404).json({ error: 'API Key not found' });
     
     await logAdminAction((req as any).user.id, 'API_KEY_DELETED', { keyId: id });
+    
+    // Force a reconnection or reload to apply changes immediately
+    const { MarketService } = await import('../services/market.service');
+    await MarketService.reloadProvider(key.provider);
+
     res.json({ message: 'API Key deleted successfully' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
