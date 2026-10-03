@@ -142,9 +142,8 @@ export class MarketProvider {
     const yfSymbol = this.getYahooSymbol(normalized);
     
     if (!this.yahooFinanceInstance) {
-      const yahooFinanceLib = (await import('yahoo-finance2')).default;
-      (yahooFinanceLib as any).suppressNotices(['yahooSurvey']);
-      this.yahooFinanceInstance = yahooFinanceLib;
+      const YahooFinance = (await import('yahoo-finance2')).default;
+      this.yahooFinanceInstance = new (YahooFinance as any)();
     }
     
     try {
@@ -467,9 +466,8 @@ export class MarketProvider {
     const yfSymbol = this.getYahooSymbol(normalized);
     
     if (!this.yahooFinanceInstance) {
-      const yahooFinanceLib = (await import('yahoo-finance2')).default;
-      (yahooFinanceLib as any).suppressNotices(['yahooSurvey']);
-      this.yahooFinanceInstance = yahooFinanceLib;
+      const YahooFinance = (await import('yahoo-finance2')).default;
+      this.yahooFinanceInstance = new (YahooFinance as any)();
     }
     
     const interval = this.mapTimeframeToYahoo(timeframe);
