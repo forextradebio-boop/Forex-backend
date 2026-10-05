@@ -351,14 +351,52 @@ export class MarketProvider {
 
     let quote: QuotePayload | null = null;
 
+    if (normalized === 'USOIL') {
+      const { AlphaVantageWtiProvider } = await import('./alphaVantageWtiProvider');
+      try {
+        const wtiData = await AlphaVantageWtiProvider.getWTI();
+        if (wtiData) {
+          const spec = SymbolSpecification.getSync('USOIL');
+          const spreadPips = spec.spread !== undefined ? spec.spread : 1;
+          const digits = spec.digits !== undefined ? spec.digits : 3;
+          const pipSize = digits === 2 || digits === 3 ? 0.01 : 0.0001;
+          const spreadValue = spreadPips * pipSize;
+          
+          return {
+            symbol: 'USOIL',
+            price: wtiData.price,
+            bid: Number(wtiData.price.toFixed(6)),
+            ask: Number((wtiData.price + spreadValue).toFixed(6)),
+            spread: spreadPips,
+            high: wtiData.price,
+            low: wtiData.price,
+            open: wtiData.price,
+            previousClose: wtiData.price,
+            change: 0,
+            changePercent: 0,
+            category: SymbolMapper.getCategory('USOIL'),
+            marketStatus: 'OPEN',
+            volume: 0,
+            timestamp: wtiData.timestamp,
+            // Custom fields that might be useful
+            source: wtiData.provider,
+            sourceDate: wtiData.sourceDate
+          } as any;
+        }
+      } catch (err: any) {
+        console.warn(`[MarketProvider] AlphaVantage WTI fetch failed: ${err.message}`);
+      }
+    }
+
     if (!quote && providerMap['INFOWAY']) quote = await tryFetch(() => this.fetchInfowayQuote(normalized, providerMap['INFOWAY']));
     if (!quote && (providerMap['CRYPTOAPIS'] || providerMap['CRYPTO']) && SymbolMapper.getCategory(normalized) === 'CRYPTO') quote = await tryFetch(() => this.fetchCryptoApisQuote(normalized, providerMap['CRYPTOAPIS'] || providerMap['CRYPTO']));
     if (!quote && providerMap['FINNHUB']) quote = await tryFetch(() => this.fetchFinnhubQuote(normalized, providerMap['FINNHUB']));
     if (!quote && providerMap['TWELVEDATA']) quote = await tryFetch(() => this.fetchTwelveDataQuote(normalized, providerMap['TWELVEDATA']));
     if (!quote && providerMap['BINANCE'] && SymbolMapper.getCategory(normalized) === 'CRYPTO') quote = await tryFetch(() => this.fetchBinanceQuote(normalized, providerMap['BINANCE']));
 
+    // DO NOT USE METALPRICE API FOR USOIL ANYMORE. It has been replaced by AlphaVantage WTI.
     const metalKey = providerMap['US OIL'] || providerMap['USOIL'] || providerMap['METALPRICE'];
-    if (!quote && metalKey) quote = await tryFetch(() => this.fetchMetalPriceQuote(normalized, metalKey));
+    if (!quote && metalKey && normalized !== 'USOIL') quote = await tryFetch(() => this.fetchMetalPriceQuote(normalized, metalKey));
 
     if (!quote && providerMap['VANTAG']) quote = await tryFetch(() => this.fetchVantageQuote(normalized, providerMap['VANTAG']));
     if (!quote && providerMap['VANTAGE']) quote = await tryFetch(() => this.fetchVantageQuote(normalized, providerMap['VANTAGE']));
@@ -425,6 +463,11 @@ export class MarketProvider {
     }, {});
 
     const normalized = this.normalizeSymbol(symbol);
+
+    if (normalized === 'USOIL') {
+      const { AlphaVantageWtiProvider } = await import('./alphaVantageWtiProvider');
+      return await AlphaVantageWtiProvider.getWtiCandles();
+    }
 
     try {
       if (providerMap['INFOWAY']) return await this.fetchInfowayCandles(normalized, timeframe, providerMap['INFOWAY']);
