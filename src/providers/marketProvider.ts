@@ -143,7 +143,9 @@ export class MarketProvider {
     const yfSymbol = this.getYahooSymbol(normalized);
     
     if (!this.yahooFinanceInstance) {
-       this.yahooFinanceInstance = typeof yahooFinance === 'function' ? new (yahooFinance as any)() : yahooFinance;
+       this.yahooFinanceInstance = typeof yahooFinance === 'function'
+         ? new (yahooFinance as any)({ suppressNotices: ['yahooSurvey'] })
+         : yahooFinance;
     }
     
     try {
@@ -157,13 +159,26 @@ export class MarketProvider {
 
       const price = Number(payload.regularMarketPrice);
       const previousClose = Number(payload.regularMarketPreviousClose || price);
+      const configuredSpread = this.getSpread(normalized);
+      const digits = this.getDigits(normalized);
+      const pipSize = digits === 2 || digits === 3 ? 0.01 : 0.0001;
+      const payloadBid = Number(payload.bid);
+      const payloadAsk = Number(payload.ask);
+      const hasValidMarketSpread = payloadBid > 0 && payloadAsk > payloadBid;
+      const bid = hasValidMarketSpread ? payloadBid : price;
+      const ask = hasValidMarketSpread
+        ? payloadAsk
+        : Number((price + configuredSpread * pipSize).toFixed(6));
+      const spread = hasValidMarketSpread
+        ? Number(((ask - bid) / pipSize).toFixed(1))
+        : configuredSpread;
       
       return {
         symbol: normalized,
         price: price,
-        bid: Number(payload.bid || price),
-        ask: Number(payload.ask || price),
-        spread: 0,
+        bid,
+        ask,
+        spread,
         high: Number(payload.regularMarketDayHigh || price),
         low: Number(payload.regularMarketDayLow || price),
         open: Number(payload.regularMarketOpen || price),
@@ -353,39 +368,46 @@ export class MarketProvider {
 
     let quote: QuotePayload | null = null;
 
-    if (normalized === 'USOIL') {
-      const { OilPriceApiProvider } = await import('./oilPriceApiProvider');
+    // Prefer Yahoo's current futures quotes over ApiNinjas' dated commodity snapshots.
+    if (normalized === 'USOIL' || normalized === 'XAGUSD') {
+      quote = await tryFetch(() => this.fetchYahooQuote(normalized));
+    }
+
+    if (normalized === 'USOIL' || normalized === 'XAUUSD' || normalized === 'XAGUSD') {
+      const { ApiNinjasProvider } = await import('./apiNinjasProvider');
       try {
-        const wtiData = await OilPriceApiProvider.getWTI();
-        if (wtiData) {
-          const spec = SymbolSpecification.getSync('USOIL');
+        if (quote) return quote;
+        const customData = await ApiNinjasProvider.getQuote(normalized);
+        if (customData) {
+          const spec = SymbolSpecification.getSync(normalized);
           const spreadPips = spec.spread !== undefined ? spec.spread : 1;
           const digits = spec.digits !== undefined ? spec.digits : 3;
           const pipSize = digits === 2 || digits === 3 ? 0.01 : 0.0001;
+          // Crude oil usually uses 0.01 pip size, XAU uses 0.01
           const spreadValue = spreadPips * pipSize;
           
           quote = {
-            symbol: 'USOIL',
-            price: wtiData.price,
-            bid: Number(wtiData.price.toFixed(6)),
-            ask: Number((wtiData.price + spreadValue).toFixed(6)),
+            symbol: normalized,
+            price: customData.price,
+            bid: Number(customData.price.toFixed(6)),
+            ask: Number((customData.price + spreadValue).toFixed(6)),
             spread: spreadPips,
-            high: wtiData.price,
-            low: wtiData.price,
-            open: wtiData.price,
-            previousClose: wtiData.price,
+            high: customData.price,
+            low: customData.price,
+            open: customData.price,
+            previousClose: customData.price,
             change: 0,
             changePercent: 0,
-            category: SymbolMapper.getCategory('USOIL'),
+            category: SymbolMapper.getCategory(normalized),
             marketStatus: 'OPEN',
             volume: 0,
-            timestamp: wtiData.timestamp,
-            source: wtiData.provider,
-            sourceDate: wtiData.sourceDate
+            timestamp: customData.timestamp,
+            source: customData.provider,
+            sourceDate: customData.sourceDate
           } as any;
         }
       } catch (err: any) {
-        console.warn(`[MarketProvider] OilPriceAPI WTI fetch failed: ${err.message}, falling through to fallbacks...`);
+        console.warn(`[MarketProvider] ApiNinjas fetch failed for ${normalized}: ${err.message}, falling through to fallbacks...`);
       }
     }
 

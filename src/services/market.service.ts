@@ -48,12 +48,12 @@ export class MarketService {
     this.metrics.activeSymbols = this.activeSymbols.length;
     
     const cryptoSymbols = ['BTCUSDT', 'ETHUSDT', 'LTCUSDT', 'BCHUSDT', 'XRPUSDT', 'DOGEUSDT'].map(s => s.replace('USDT', 'USD'));
-    // Populate TwelveData symbols (everything except crypto)
+    const customSymbols = ['USOIL', 'UKOIL', 'XAUUSD', 'XAGUSD'];
+    // Populate TwelveData symbols (everything except crypto and custom symbols)
     this.WS_SYMBOLS = this.activeSymbols
-      .filter(sym => !cryptoSymbols.includes(sym))
+      .filter(sym => !cryptoSymbols.includes(sym) && !customSymbols.includes(sym))
       .map(sym => {
         if (sym.length === 6 && !sym.includes('/')) return `${sym.substring(0,3)}/${sym.substring(3)}`;
-        if (sym === 'UKOIL') return 'BRENT';
         return sym;
       });
 
@@ -106,12 +106,14 @@ export class MarketService {
         this.activeSymbols = await this.getWatchSymbols();
         this.metrics.activeSymbols = this.activeSymbols.length;
         
+        const cryptoSymbols = ['BTCUSDT', 'ETHUSDT', 'LTCUSDT', 'BCHUSDT', 'XRPUSDT', 'DOGEUSDT'].map(s => s.replace('USDT', 'USD'));
+        const customSymbols = ['USOIL', 'UKOIL', 'XAUUSD', 'XAGUSD'];
+        
         // Update WS_SYMBOLS list in background
         const updatedWsSymbols = this.activeSymbols
-          .filter(sym => !cryptoSymbols.includes(sym))
+          .filter(sym => !cryptoSymbols.includes(sym) && !customSymbols.includes(sym))
           .map(sym => {
             if (sym.length === 6 && !sym.includes('/')) return `${sym.substring(0,3)}/${sym.substring(3)}`;
-            if (sym === 'UKOIL') return 'BRENT';
             return sym;
           });
           
