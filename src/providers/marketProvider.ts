@@ -2,6 +2,7 @@ import axios from 'axios';
 import { SymbolMapper } from './symbolMapper';
 import { SymbolSpecification } from '../engine/SymbolSpecification';
 import { ApiKeyModel } from '../models/ApiKey';
+import yahooFinance from 'yahoo-finance2';
 
 interface CandlePoint {
   time: number;
@@ -142,8 +143,7 @@ export class MarketProvider {
     const yfSymbol = this.getYahooSymbol(normalized);
     
     if (!this.yahooFinanceInstance) {
-      const YahooFinance = (await import('yahoo-finance2')).default;
-      this.yahooFinanceInstance = new (YahooFinance as any)();
+       this.yahooFinanceInstance = typeof yahooFinance === 'function' ? new (yahooFinance as any)() : yahooFinance;
     }
     
     try {
@@ -426,7 +426,8 @@ export class MarketProvider {
        console.warn(`[MarketProvider] All active providers failed for ${normalized}. Trying YAHOO as absolute fallback.`);
        return await this.fetchYahooQuote(normalized);
     } catch (e: any) {
-       throw new Error('All providers failed and YAHOO fallback failed.');
+       console.error(`[MarketProvider] YAHOO fallback also failed:`, e);
+       throw new Error(`All providers failed and YAHOO fallback failed: ${e.message}`);
     }
   }
 
@@ -522,8 +523,7 @@ export class MarketProvider {
     const yfSymbol = this.getYahooSymbol(normalized);
     
     if (!this.yahooFinanceInstance) {
-      const YahooFinance = (await import('yahoo-finance2')).default;
-      this.yahooFinanceInstance = new (YahooFinance as any)();
+       this.yahooFinanceInstance = typeof yahooFinance === 'function' ? new (yahooFinance as any)() : yahooFinance;
     }
     
     const interval = this.mapTimeframeToYahoo(timeframe);
