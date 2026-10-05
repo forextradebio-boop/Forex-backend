@@ -395,9 +395,42 @@ export class MarketProvider {
     if (!quote && providerMap['TWELVEDATA']) quote = await tryFetch(() => this.fetchTwelveDataQuote(normalized, providerMap['TWELVEDATA']));
     if (!quote && providerMap['BINANCE'] && SymbolMapper.getCategory(normalized) === 'CRYPTO') quote = await tryFetch(() => this.fetchBinanceQuote(normalized, providerMap['BINANCE']));
 
-    // DO NOT USE METALPRICE API FOR USOIL ANYMORE. It has been replaced by AlphaVantage WTI.
-    const metalKey = providerMap['US OIL'] || providerMap['USOIL'] || providerMap['METALPRICE'];
-    if (!quote && metalKey && normalized !== 'USOIL') quote = await tryFetch(() => this.fetchMetalPriceQuote(normalized, metalKey));
+    // Use MassiveProvider for Metals
+    const massiveKey = providerMap['MASSIVE'] || providerMap['METALPRICE'];
+    if (!quote && massiveKey && (normalized === 'XAUUSD' || normalized === 'XAGUSD')) {
+      const { MassiveProvider } = await import('./massiveProvider');
+      try {
+        const massiveData = await MassiveProvider.getQuote(normalized);
+        if (massiveData) {
+          const spec = SymbolSpecification.getSync(normalized);
+          const spreadPips = spec.spread !== undefined ? spec.spread : 1;
+          const digits = spec.digits !== undefined ? spec.digits : 2;
+          const pipSize = digits === 2 || digits === 3 ? 0.01 : 0.0001;
+          const spreadValue = spreadPips * pipSize;
+
+          quote = {
+            symbol: normalized,
+            price: massiveData.price,
+            bid: Number(massiveData.price.toFixed(6)),
+            ask: Number((massiveData.price + spreadValue).toFixed(6)),
+            spread: spreadPips,
+            high: massiveData.high,
+            low: massiveData.low,
+            open: massiveData.open,
+            previousClose: massiveData.previousClose,
+            change: 0,
+            changePercent: 0,
+            category: SymbolMapper.getCategory(normalized),
+            marketStatus: 'OPEN',
+            volume: massiveData.volume,
+            timestamp: massiveData.timestamp,
+            source: 'massive'
+          } as any;
+        }
+      } catch (err: any) {
+        console.warn(`[MarketProvider] Massive fetch failed for ${normalized}: ${err.message}, falling back...`);
+      }
+    }
 
     if (!quote && providerMap['VANTAG']) quote = await tryFetch(() => this.fetchVantageQuote(normalized, providerMap['VANTAG']));
     if (!quote && providerMap['VANTAGE']) quote = await tryFetch(() => this.fetchVantageQuote(normalized, providerMap['VANTAGE']));
