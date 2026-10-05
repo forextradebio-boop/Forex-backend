@@ -354,9 +354,9 @@ export class MarketProvider {
     let quote: QuotePayload | null = null;
 
     if (normalized === 'USOIL') {
-      const { AlphaVantageWtiProvider } = await import('./alphaVantageWtiProvider');
+      const { OilPriceApiProvider } = await import('./oilPriceApiProvider');
       try {
-        const wtiData = await AlphaVantageWtiProvider.getWTI();
+        const wtiData = await OilPriceApiProvider.getWTI();
         if (wtiData) {
           const spec = SymbolSpecification.getSync('USOIL');
           const spreadPips = spec.spread !== undefined ? spec.spread : 1;
@@ -385,7 +385,7 @@ export class MarketProvider {
           } as any;
         }
       } catch (err: any) {
-        console.warn(`[MarketProvider] AlphaVantage WTI fetch failed: ${err.message}, falling through to fallbacks...`);
+        console.warn(`[MarketProvider] OilPriceAPI WTI fetch failed: ${err.message}, falling through to fallbacks...`);
       }
     }
 
@@ -467,8 +467,12 @@ export class MarketProvider {
     const normalized = this.normalizeSymbol(symbol);
 
     if (normalized === 'USOIL') {
-      const { AlphaVantageWtiProvider } = await import('./alphaVantageWtiProvider');
-      return await AlphaVantageWtiProvider.getWtiCandles();
+      try {
+        return await this.fetchYahooCandles(normalized, timeframe);
+      } catch (err: any) {
+        console.warn(`[MarketProvider] USOIL Yahoo candles fetch failed: ${err.message}`);
+        return [];
+      }
     }
 
     try {
