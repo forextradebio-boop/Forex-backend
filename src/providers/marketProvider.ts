@@ -147,7 +147,9 @@ export class MarketProvider {
     }
     
     try {
+      console.log(`[MarketProvider] Fetching Yahoo quote for ${symbol} (${yfSymbol})`);
       const payload = await this.yahooFinanceInstance.quote(yfSymbol);
+      console.log(`[MarketProvider] Yahoo response for ${symbol}: price=${payload?.regularMarketPrice}`);
       
       if (!payload) {
         throw new Error(`Invalid Yahoo response for ${symbol}`);
@@ -362,7 +364,7 @@ export class MarketProvider {
           const pipSize = digits === 2 || digits === 3 ? 0.01 : 0.0001;
           const spreadValue = spreadPips * pipSize;
           
-          return {
+          quote = {
             symbol: 'USOIL',
             price: wtiData.price,
             bid: Number(wtiData.price.toFixed(6)),
@@ -378,26 +380,12 @@ export class MarketProvider {
             marketStatus: 'OPEN',
             volume: 0,
             timestamp: wtiData.timestamp,
-            // Custom fields that might be useful
             source: wtiData.provider,
             sourceDate: wtiData.sourceDate
           } as any;
-        } else {
-          return {
-            symbol: 'USOIL',
-            provider: 'alpha_vantage',
-            isStale: true,
-            error: "Alpha Vantage unavailable or disabled"
-          } as any;
         }
       } catch (err: any) {
-        console.warn(`[MarketProvider] AlphaVantage WTI fetch failed: ${err.message}`);
-        return {
-          symbol: 'USOIL',
-          provider: 'alpha_vantage',
-          isStale: true,
-          error: "Alpha Vantage unavailable"
-        } as any;
+        console.warn(`[MarketProvider] AlphaVantage WTI fetch failed: ${err.message}, falling through to fallbacks...`);
       }
     }
 
