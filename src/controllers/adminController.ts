@@ -16,6 +16,7 @@ import { SocketServer } from '../services/socketServer';
 import { ExchangeRateModel } from '../models/ExchangeRate';
 import { ApiKeyModel } from '../models/ApiKey';
 import { MarketService } from '../services/market.service';
+import { ProviderSettingsModel } from '../models/ProviderSettings';
 
 const buildPublicUploadUrl = (value?: string, request?: Request) => {
   if (!value || typeof value !== 'string') return value;
@@ -1034,5 +1035,44 @@ export const deleteApiKey = async (req: Request, res: Response) => {
     res.json({ message: 'API Key deleted successfully' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+};
+
+export const getMarketProviders = async (req: Request, res: Response) => {
+  try {
+    let providers = await ProviderSettingsModel.find();
+    
+    // Auto-seed USOIL AlphaVantage setting if missing
+    if (!providers.find(p => p.symbol === 'USOIL' && p.provider === 'alpha_vantage')) {
+      const p = await ProviderSettingsModel.create({
+        symbol: 'USOIL',
+        provider: 'alpha_vantage',
+        enabled: true
+      });
+      providers.push(p);
+    }
+    
+    res.json({ success: true, providers });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+export const toggleMarketProvider = async (req: Request, res: Response) => {
+  try {
+    const { symbol } = req.params;
+    const { enabled } = req.body;
+    
+    const provider = await ProviderSettingsModel.findOne({ symbol: symbol.toUpperCase() });
+    if (!provider) {
+       return res.status(404).json({ success: false, error: 'Provider not found' });
+    }
+    
+    provider.enabled = enabled;
+    await provider.save();
+    
+    res.json({ success: true, provider });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 };
