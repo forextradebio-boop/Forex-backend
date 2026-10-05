@@ -72,6 +72,10 @@ export class MarketService {
             
             const isWsActive = (this.ws && this.ws.readyState === 1) || (this.finnhubWs && this.finnhubWs.readyState === 1);
             if (!isCrypto && isWsActive) {
+               const cached = this.latestPriceCache.get(this.normalizeSymbol(sym));
+               if (!cached || (Date.now() - cached.timestamp > 15000)) {
+                  return true; // Force REST poll if stale for 15s (meaning WS isn't providing updates)
+               }
                if (this.WS_SYMBOLS.includes(sym) || this.WS_SYMBOLS.includes(sym.replace('/', ''))) return false;
             }
             
