@@ -37,7 +37,9 @@ import {
   getApiKeys,
   addApiKey,
   toggleApiKey,
-  deleteApiKey
+  deleteApiKey,
+  getMarketProviders,
+  toggleMarketProvider
 } from '../controllers/adminController';
 import {
   getAllDeposits,
@@ -122,5 +124,9 @@ router.get('/apikeys', getApiKeys);
 router.post('/apikeys', addApiKey);
 router.patch('/apikeys/:id/toggle', toggleApiKey);
 router.delete('/apikeys/:id', deleteApiKey);
+
+// Market Provider Settings
+router.get('/market-providers', getMarketProviders);
+router.patch('/market-providers/:symbol', toggleMarketProvider);
 
 export default router;
