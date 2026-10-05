@@ -1052,7 +1052,12 @@ export const getMarketProviders = async (req: Request, res: Response) => {
       providers.push(p);
     }
     
-    res.json({ success: true, providers });
+    const mappedProviders = providers.map(p => ({
+      ...p.toObject(),
+      apiKeyConfigured: !!process.env.ALPHA_VANTAGE_API_KEY
+    }));
+    
+    res.json({ success: true, providers: mappedProviders });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1074,5 +1079,23 @@ export const toggleMarketProvider = async (req: Request, res: Response) => {
     res.json({ success: true, provider });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+export const getMarketProviderStatus = async (req: Request, res: Response) => {
+  try {
+    const { symbol } = req.params;
+    const { MarketService } = await import('../services/market.service');
+    const quote = MarketService.getCachedQuote(symbol);
+    
+    res.json({
+      success: true,
+      symbol,
+      quote: quote || null,
+      apiKeyConfigured: !!process.env.ALPHA_VANTAGE_API_KEY,
+      envKeyLength: process.env.ALPHA_VANTAGE_API_KEY ? process.env.ALPHA_VANTAGE_API_KEY.length : 0
+    });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
   }
 };
