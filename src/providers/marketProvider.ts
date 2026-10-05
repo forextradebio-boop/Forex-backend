@@ -382,9 +382,22 @@ export class MarketProvider {
             source: wtiData.provider,
             sourceDate: wtiData.sourceDate
           } as any;
+        } else {
+          return {
+            symbol: 'USOIL',
+            provider: 'alpha_vantage',
+            isStale: true,
+            error: "Alpha Vantage unavailable or disabled"
+          } as any;
         }
       } catch (err: any) {
         console.warn(`[MarketProvider] AlphaVantage WTI fetch failed: ${err.message}`);
+        return {
+          symbol: 'USOIL',
+          provider: 'alpha_vantage',
+          isStale: true,
+          error: "Alpha Vantage unavailable"
+        } as any;
       }
     }
 
