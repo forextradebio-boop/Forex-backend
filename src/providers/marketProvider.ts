@@ -160,7 +160,7 @@ export class MarketProvider {
       const price = Number(payload.regularMarketPrice);
       const previousClose = Number(payload.regularMarketPreviousClose || price);
       const configuredSpread = this.getSpread(normalized);
-      const digits = this.getDigits(normalized);
+      const digits = SymbolSpecification.getSync(normalized).digits ?? 5;
       const pipSize = digits === 2 || digits === 3 ? 0.01 : 0.0001;
       const payloadBid = Number(payload.bid);
       const payloadAsk = Number(payload.ask);
