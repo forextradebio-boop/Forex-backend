@@ -4,7 +4,7 @@ import { ProviderSettingsModel } from '../models/ProviderSettings';
 
 export class AlphaVantageWtiProvider {
   private static wtiRequestPromise: Promise<any> | null = null;
-  private static readonly WTI_CACHE_TTL_MS = Number(process.env.WTI_CACHE_TTL_MS) || 300000;
+  private static readonly WTI_CACHE_TTL_MS = Number(process.env.WTI_CACHE_TTL_MS) || 3600000; // Cache for 1 hour to prevent 25req/day limit
   private static cachedData: any = null;
 
   private static async getSettings() {
