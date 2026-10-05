@@ -53,7 +53,6 @@ export class MarketService {
       .filter(sym => !cryptoSymbols.includes(sym))
       .map(sym => {
         if (sym.length === 6 && !sym.includes('/')) return `${sym.substring(0,3)}/${sym.substring(3)}`;
-        if (sym === 'USOIL') return 'WTI';
         if (sym === 'UKOIL') return 'BRENT';
         return sym;
       });
@@ -108,7 +107,6 @@ export class MarketService {
           .filter(sym => !cryptoSymbols.includes(sym))
           .map(sym => {
             if (sym.length === 6 && !sym.includes('/')) return `${sym.substring(0,3)}/${sym.substring(3)}`;
-            if (sym === 'USOIL') return 'WTI';
             if (sym === 'UKOIL') return 'BRENT';
             return sym;
           });
