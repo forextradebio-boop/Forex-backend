@@ -143,9 +143,10 @@ export class MarketProvider {
     const yfSymbol = this.getYahooSymbol(normalized);
     
     if (!this.yahooFinanceInstance) {
-       this.yahooFinanceInstance = typeof yahooFinance === 'function'
-         ? new (yahooFinance as any)({ suppressNotices: ['yahooSurvey'] })
-         : yahooFinance;
+       const yfClass = (yahooFinance as any).default || yahooFinance;
+       this.yahooFinanceInstance = typeof yfClass === 'function'
+         ? new yfClass({ suppressNotices: ['yahooSurvey'] })
+         : yfClass;
     }
     
     try {
@@ -570,7 +571,8 @@ export class MarketProvider {
     const yfSymbol = this.getYahooSymbol(normalized);
     
     if (!this.yahooFinanceInstance) {
-       this.yahooFinanceInstance = typeof yahooFinance === 'function' ? new (yahooFinance as any)() : yahooFinance;
+       const yfClass = (yahooFinance as any).default || yahooFinance;
+       this.yahooFinanceInstance = typeof yfClass === 'function' ? new yfClass() : yfClass;
     }
     
     const interval = this.mapTimeframeToYahoo(timeframe);
