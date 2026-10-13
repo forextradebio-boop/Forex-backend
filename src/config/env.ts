@@ -18,8 +18,21 @@ if (nodeEnv === 'production' && !process.env.JWT_REFRESH_SECRET) {
   throw new Error('JWT_REFRESH_SECRET is missing from .env');
 }
 
+const defaultAtlasUri = 'mongodb://forextradebio_db_user:ForexTradebio_db_user@ac-zo3ciit-shard-00-00.3w3sdqj.mongodb.net:27017,ac-zo3ciit-shard-00-01.3w3sdqj.mongodb.net:27017,ac-zo3ciit-shard-00-02.3w3sdqj.mongodb.net:27017/forextradebio?ssl=true&replicaSet=atlas-cty2mf-shard-0&authSource=admin&retryWrites=true&w=majority&appName=Cluster0';
+
+const getMongoUri = () => {
+  const uri = process.env.MONGODB_URI;
+  if (uri && !uri.includes('127.0.0.1') && !uri.includes('localhost')) {
+    return uri;
+  }
+  if (nodeEnv === 'production') {
+    return defaultAtlasUri;
+  }
+  return uri || 'mongodb://127.0.0.1:27017/forex-factory';
+};
+
 export const config = {
-  mongoUri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/forex-factory',
+  mongoUri: getMongoUri(),
   jwtSecret: process.env.JWT_SECRET || defaultJwtSecret,
   jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || defaultRefreshSecret,
   port: process.env.PORT || '8000',
