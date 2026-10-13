@@ -18,15 +18,22 @@ export const connectDatabase = async () => {
       });
       console.log('MongoDB Connected Successfully (in-memory)');
     } else {
+      if ((config.mongoUri.includes('127.0.0.1') || config.mongoUri.includes('localhost')) && config.nodeEnv === 'production') {
+        console.warn('⚠️ WARNING: Using localhost/127.0.0.1 MongoDB URI in production! In Render or cloud hosting, you must set MONGODB_URI in the Environment variables to a MongoDB Atlas cluster URL.');
+      }
       await mongoose.connect(config.mongoUri, {
         dbName: 'forextradebio',
-        serverSelectionTimeoutMS: 5000,
+        serverSelectionTimeoutMS: 15000,
         socketTimeoutMS: 45000,
       });
       console.log('MongoDB Connected Successfully to forextradebio database');
     }
   } catch (err) {
     console.error('MongoDB connection error:', err);
+    if (config.mongoUri.includes('127.0.0.1') || config.mongoUri.includes('localhost')) {
+      console.error('\n❌ Cloud deployment failed because MONGODB_URI is pointing to localhost (127.0.0.1:27017).');
+      console.error('👉 Fix: Go to your Render Dashboard -> Forex-backend -> Environment, and add MONGODB_URI with your MongoDB Atlas connection string.');
+    }
     process.exit(1);
   }
 
