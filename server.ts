@@ -33,7 +33,9 @@ import { initDefaultRate } from './src/controllers/exchangeRateController';
 import { protect } from './src/middleware/authMiddleware';
 import { getClosedPositions } from './src/controllers/tradingController';
 
-console.log("MONGO URI =", process.env.MONGODB_URI);
+import { config } from './src/config/env';
+
+console.log("MONGO URI =", config.mongoUri ? config.mongoUri.replace(/:([^@]+)@/, ':****@') : 'NOT_SET');
 
 const app = express();
 const defaultAllowedOrigins = [
