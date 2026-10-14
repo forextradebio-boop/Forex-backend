@@ -117,6 +117,15 @@ export const getStocks = async (req: Request, res: Response) => {
   }
 };
 
+export const getMetals = async (req: Request, res: Response) => {
+  try {
+    const quotes = await MarketService.getSymbolsByCategory('METALS');
+    res.json(quotes);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 export const getSearch = async (req: Request, res: Response) => {
   try {
     const query = req.query.q as string;
