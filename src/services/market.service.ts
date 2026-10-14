@@ -159,6 +159,11 @@ export class MarketService {
       console.log('[MarketService] Reloading Yahoo status...');
       const keyRecord = await ApiKeyModel.findOne({ provider: 'YAHOO' });
       this.isYahooActive = keyRecord?.status === 'ACTIVE';
+    } else if (['METALPRICEAPI', 'METALS_API', 'METALSAPI', 'METALPRICE', 'METALS-API'].includes(provider.toUpperCase())) {
+      console.log('[MarketService] Reloading MetalPriceAPI provider...');
+      const { MetalPriceApiProvider } = await import('../providers/metalPriceApiProvider');
+      MetalPriceApiProvider.clearCache();
+      await this.pollRestQuotes(['XAUUSD', 'XAGUSD']);
     }
   }
 
