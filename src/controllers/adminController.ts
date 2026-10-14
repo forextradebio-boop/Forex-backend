@@ -1051,11 +1051,44 @@ export const getMarketProviders = async (req: Request, res: Response) => {
       });
       providers.push(p);
     }
+
+    // Auto-seed XAUUSD MetalPriceAPI setting if missing
+    if (!providers.find(p => p.symbol === 'XAUUSD' && p.provider === 'metalpriceapi')) {
+      const p = await ProviderSettingsModel.create({
+        symbol: 'XAUUSD',
+        provider: 'metalpriceapi',
+        enabled: true
+      });
+      providers.push(p);
+    }
+
+    // Auto-seed XAGUSD MetalPriceAPI setting if missing
+    if (!providers.find(p => p.symbol === 'XAGUSD' && p.provider === 'metalpriceapi')) {
+      const p = await ProviderSettingsModel.create({
+        symbol: 'XAGUSD',
+        provider: 'metalpriceapi',
+        enabled: true
+      });
+      providers.push(p);
+    }
+
+    const { MetalPriceApiProvider } = await import('../providers/metalPriceApiProvider');
+    const metalKey = await MetalPriceApiProvider.getActiveKey();
     
-    const mappedProviders = providers.map(p => ({
-      ...p.toObject(),
-      apiKeyConfigured: !!process.env.ALPHA_VANTAGE_API_KEY
-    }));
+    const mappedProviders = providers.map(p => {
+      let isConfigured = false;
+      if (p.provider === 'metalpriceapi') {
+        isConfigured = !!metalKey;
+      } else if (p.symbol === 'USOIL') {
+        isConfigured = !!process.env.ALPHA_VANTAGE_API_KEY || !!process.env.OILPRICEAPI_KEY;
+      } else {
+        isConfigured = true;
+      }
+      return {
+        ...p.toObject(),
+        apiKeyConfigured: isConfigured
+      };
+    });
     
     res.json({ success: true, providers: mappedProviders });
   } catch (err: any) {
@@ -1075,6 +1108,13 @@ export const toggleMarketProvider = async (req: Request, res: Response) => {
     
     provider.enabled = enabled;
     await provider.save();
+
+    if (symbol.toUpperCase() === 'XAUUSD' || symbol.toUpperCase() === 'XAGUSD') {
+      const { MetalPriceApiProvider } = await import('../providers/metalPriceApiProvider');
+      MetalPriceApiProvider.clearCache();
+      const { MarketService } = await import('../services/market.service');
+      await MarketService.reloadProvider('METALPRICEAPI');
+    }
     
     res.json({ success: true, provider });
   } catch (err: any) {
@@ -1085,15 +1125,24 @@ export const toggleMarketProvider = async (req: Request, res: Response) => {
 export const getMarketProviderStatus = async (req: Request, res: Response) => {
   try {
     const { symbol } = req.params;
+    const symUpper = symbol.toUpperCase();
     const { MarketService } = await import('../services/market.service');
-    const quote = MarketService.getCachedQuote(symbol);
+    const quote = MarketService.getCachedQuote(symUpper);
+    
+    let isConfigured = false;
+    if (symUpper === 'XAUUSD' || symUpper === 'XAGUSD') {
+      const { MetalPriceApiProvider } = await import('../providers/metalPriceApiProvider');
+      const key = await MetalPriceApiProvider.getActiveKey();
+      isConfigured = !!key;
+    } else {
+      isConfigured = !!process.env.ALPHA_VANTAGE_API_KEY;
+    }
     
     res.json({
       success: true,
-      symbol,
+      symbol: symUpper,
       quote: quote || null,
-      apiKeyConfigured: !!process.env.ALPHA_VANTAGE_API_KEY,
-      envKeyLength: process.env.ALPHA_VANTAGE_API_KEY ? process.env.ALPHA_VANTAGE_API_KEY.length : 0
+      apiKeyConfigured: isConfigured
     });
   } catch (e: any) {
     res.status(500).json({ success: false, error: e.message });
