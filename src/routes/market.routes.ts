@@ -15,7 +15,8 @@ import {
   getSymbolDetail,
   getCrudeOil,
   getCrudeOilChart,
-  getDividends
+  getDividends,
+  getMetals
 } from '../controllers/market.controller';
 
 const router = express.Router();
@@ -44,6 +45,7 @@ router.get('/get-movers', getMovers);
 router.get('/forex', getForex);
 router.get('/crypto', getCrypto);
 router.get('/stocks', getStocks);
+router.get('/metals', getMetals);
 router.get('/search', getSearch);
 router.get('/quote', getQuote);
 
