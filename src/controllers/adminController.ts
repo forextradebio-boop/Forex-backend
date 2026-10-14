@@ -1072,18 +1072,28 @@ export const getMarketProviders = async (req: Request, res: Response) => {
       providers.push(p);
     }
 
-    const { MetalPriceApiProvider } = await import('../providers/metalPriceApiProvider');
-    const metalKey = await MetalPriceApiProvider.getActiveKey();
-    
+    const activeKeys = await ApiKeyModel.find({ status: 'ACTIVE' });
+    const activeProviders = new Set(activeKeys.map(k => (k.provider || '').toUpperCase()));
+
     const mappedProviders = providers.map(p => {
       let isConfigured = false;
-      if (p.provider === 'metalpriceapi') {
-        isConfigured = !!metalKey;
-      } else if (p.symbol === 'USOIL') {
-        isConfigured = !!process.env.ALPHA_VANTAGE_API_KEY || !!process.env.OILPRICEAPI_KEY;
+      const provLower = (p.provider || '').toLowerCase();
+      if (provLower === 'metalpriceapi') {
+        isConfigured = activeProviders.has('METALPRICEAPI') || 
+                       activeProviders.has('METALS_API') || 
+                       activeProviders.has('METALSAPI') || 
+                       activeProviders.has('METALPRICE') || 
+                       !!process.env.METALPRICEAPI_KEY;
+      } else if (provLower === 'oilpriceapi') {
+        isConfigured = activeProviders.has('OILPRICEAPI') || !!process.env.OILPRICEAPI_KEY;
+      } else if (provLower === 'apininjas') {
+        isConfigured = activeProviders.has('APININJAS') || !!process.env.APININJAS_API_KEY;
+      } else if (provLower === 'alpha_vantage') {
+        isConfigured = activeProviders.has('ALPHAVANTAGE') || activeProviders.has('VANTAGE') || !!process.env.ALPHA_VANTAGE_API_KEY;
       } else {
-        isConfigured = true;
+        isConfigured = activeProviders.has((p.provider || '').toUpperCase());
       }
+
       return {
         ...p.toObject(),
         apiKeyConfigured: isConfigured
@@ -1099,17 +1109,32 @@ export const getMarketProviders = async (req: Request, res: Response) => {
 export const toggleMarketProvider = async (req: Request, res: Response) => {
   try {
     const { symbol } = req.params;
-    const { enabled } = req.body;
-    
-    const provider = await ProviderSettingsModel.findOne({ symbol: symbol.toUpperCase() });
+    const { enabled, provider: providerName, id } = req.body;
+    const queryProvider = providerName || req.query.provider;
+    const queryId = id || req.query.id;
+
+    let provider = null;
+    if (queryId) {
+      provider = await ProviderSettingsModel.findById(queryId);
+    }
+    if (!provider && queryProvider) {
+      provider = await ProviderSettingsModel.findOne({
+        symbol: symbol.toUpperCase(),
+        provider: (queryProvider as string).toLowerCase()
+      });
+    }
+    if (!provider) {
+      provider = await ProviderSettingsModel.findOne({ symbol: symbol.toUpperCase() });
+    }
+
     if (!provider) {
        return res.status(404).json({ success: false, error: 'Provider not found' });
     }
     
-    provider.enabled = enabled;
+    provider.enabled = typeof enabled === 'boolean' ? enabled : !provider.enabled;
     await provider.save();
 
-    if (symbol.toUpperCase() === 'XAUUSD' || symbol.toUpperCase() === 'XAGUSD') {
+    if (symbol.toUpperCase() === 'XAUUSD' || symbol.toUpperCase() === 'XAGUSD' || provider.provider === 'metalpriceapi') {
       const { MetalPriceApiProvider } = await import('../providers/metalPriceApiProvider');
       MetalPriceApiProvider.clearCache();
       const { MarketService } = await import('../services/market.service');
